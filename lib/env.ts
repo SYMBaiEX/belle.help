@@ -30,6 +30,7 @@ const envSchema = z.object({
   ADMIN_EMAIL: z.string().optional(),
   ADMIN_INITIAL_PASSWORD: z.string().optional(),
   ADMIN_SEED_TOKEN: z.string().optional(),
+  INTERNAL_TRIGGER_SECRET: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

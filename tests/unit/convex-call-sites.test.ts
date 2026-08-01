@@ -85,25 +85,69 @@ interface CallSite {
   spread: boolean;
 }
 
+/**
+ * Pull the top-level keys out of an object literal body.
+ *
+ * Splits on top-level commas rather than scanning with one regex: a regex that
+ * consumes the delimiter silently skips the key *after* a shorthand property
+ * (`{ actionId, bogusField: 1 }` reported only `actionId`), which made the
+ * guard pass on drift it was written to catch.
+ */
+function topLevelKeys(body: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of body) {
+    if (ch === "{" || ch === "(" || ch === "[") depth += 1;
+    else if (ch === "}" || ch === ")" || ch === "]") depth -= 1;
+
+    if (ch === "," && depth === 0) {
+      parts.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  parts.push(current);
+
+  return parts
+    .map((part) => {
+      const trimmed = part.trim();
+      if (!trimmed || trimmed.startsWith("...")) return null; // spread: unverifiable
+      // `key: value`, or shorthand `key`
+      const match = /^(\w+)\s*(?::|$)/.exec(trimmed);
+      return match ? match[1]! : null;
+    })
+    .filter((k): k is string => k !== null);
+}
+
 function callSites(): CallSite[] {
   const sites: CallSite[] = [];
   for (const root of ROOTS) {
     for (const file of walk(root)) {
       const src = readFileSync(file, "utf8");
+
+      // Untyped generated-API form used by the Workflow files and shared libs:
+      //   convex().mutation(anyApi.githubSync.syncRepositories, { … })
+      // These bypass the string-name form below and were previously unchecked,
+      // which is how Convex argument drift reached production twice.
+      const anyApiRe = /\.(?:mutation|query|action)\(\s*anyApi\.(\w+)!?\.(\w+)!?\s*,\s*\{/g;
+      let a: RegExpExecArray | null;
+      while ((a = anyApiRe.exec(src))) {
+        const body = balanced(src, a.index + a[0].length);
+        sites.push({
+          file,
+          fn: `${a[1]}:${a[2]}`,
+          args: topLevelKeys(body),
+          spread: /\.\.\./.test(body),
+        });
+      }
+
       const re = /db\.(?:mutation|query)\(\s*"([\w]+:[\w]+)"\s*,\s*\{/g;
       let m: RegExpExecArray | null;
       while ((m = re.exec(src))) {
         const body = balanced(src, m.index + m[0].length);
-        let depth = 0;
-        let flat = "";
-        for (const ch of body) {
-          if (ch === "{" || ch === "(" || ch === "[") depth += 1;
-          else if (ch === "}" || ch === ")" || ch === "]") depth -= 1;
-          else if (depth === 0) flat += ch;
-          if (depth === 0 && (ch === "}" || ch === ")" || ch === "]")) flat += ",";
-        }
-        const args = [...flat.matchAll(/(?:^|,)\s*(\w+)\s*[:,]/g)].map((k) => k[1]!);
-        sites.push({ file, fn: m[1]!, args, spread: /\.\.\./.test(body) });
+        sites.push({ file, fn: m[1]!, args: topLevelKeys(body), spread: /\.\.\./.test(body) });
       }
     }
   }

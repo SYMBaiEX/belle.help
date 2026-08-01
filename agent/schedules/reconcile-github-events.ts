@@ -3,6 +3,18 @@ import { defineSchedule } from "eve/schedules";
 import linq from "../channels/linq";
 import { db } from "../lib/convex";
 
+/**
+ * Safety-net sweep for `scheduledActions`.
+ *
+ * The fast path is `app/workflows/deferred-action.ts`, a durable Vercel
+ * Workflow started by `agent/tools/schedule_deferred_action.ts` right after
+ * a row is enqueued — it sleeps until the action is due and then acts
+ * directly, with no polling latency. This cron remains as the fallback for
+ * rows whose workflow never started (e.g. `INTERNAL_TRIGGER_SECRET` unset,
+ * or the trigger request failed), so nothing enqueued here is ever silently
+ * dropped.
+ */
+
 interface ScheduledAction {
   _id: string;
   userId: string;
