@@ -79,19 +79,26 @@ async function handleInbound(thread: Thread, message: Message): Promise<void> {
   // Respect opt-outs entirely — no reply, no model dispatch.
   if (OPT_OUT.has(text)) return;
 
-  // At-least-once delivery: drop duplicates before any side effect.
-  if (message.id && (await alreadyProcessed(message.id))) return;
-
-  await thread.subscribe();
-
   const handle = senderHandle(message);
   const linqChatId = thread.id; // stable `linq:{chatId}`
-
-  // Resolve phone identity → Belle user.
   const phoneHash = handle ? hashPhone(handle) : null;
-  let identity = (phoneHash
-    ? await db.query("phoneIdentities:getByPhoneHash", { phoneHash })
-    : await db.query("phoneIdentities:getByLinqChatId", { linqChatId })) as {
+
+  // Latency: every await here happens before the model starts, and this is a
+  // texting surface where seconds are felt. The dedup gate and the identity
+  // lookup are independent, and `subscribe()` gates nothing — run them
+  // concurrently instead of paying three sequential round-trips.
+  const [duplicate, identityResult] = await Promise.all([
+    message.id ? alreadyProcessed(message.id) : Promise.resolve(false),
+    phoneHash
+      ? db.query("phoneIdentities:getByPhoneHash", { phoneHash })
+      : db.query("phoneIdentities:getByLinqChatId", { linqChatId }),
+    thread.subscribe(),
+  ]);
+
+  // At-least-once delivery: drop duplicates before any user-visible effect.
+  if (duplicate) return;
+
+  let identity = identityResult as {
     _id: string;
     userId: string | null;
     protocol?: string;
@@ -125,7 +132,9 @@ async function handleInbound(thread: Thread, message: Message): Promise<void> {
   }
 
   // ── Known user: dispatch to the durable Belle session ──────────────────
-  await db.mutation("conversationContexts:upsert", {
+  // Refreshing the conversation pointer is bookkeeping; the model does not
+  // read it during this turn, so don't make the user wait on it.
+  const contextWrite = db.mutation("conversationContexts:upsert", {
     userId: identity.userId,
     linqChatId,
   });
@@ -144,6 +153,11 @@ async function handleInbound(thread: Thread, message: Message): Promise<void> {
       },
     },
   });
+
+  // Surface a failed bookkeeping write instead of an unhandled rejection.
+  await contextWrite.catch((error) =>
+    console.error("[linq-channel] conversationContexts:upsert failed", error),
+  );
 }
 
 interface AccessRequest {

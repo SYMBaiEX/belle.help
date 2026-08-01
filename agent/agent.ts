@@ -1,11 +1,13 @@
 import { defineAgent } from "eve";
 
-// `reasoning` is intentionally omitted: the docs (node_modules/eve/docs/
-// agent-config.md) don't confirm which effort levels Anthropic's AI SDK
-// mapping honors for claude-sonnet-5, so we leave it at the provider
-// default rather than guess.
 export default defineAgent({
   model: "anthropic/claude-sonnet-5",
+  // Belle's root session is conversational: resolve context, pick a tool,
+  // reply in a couple of sentences. Measured turns were 9-15s, and heavy
+  // deliberation on a texting surface costs latency without improving
+  // answers. Deep analysis happens in the reviewer/fixer subagents, which
+  // keep the provider default. Providers that don't honor a level ignore it.
+  reasoning: "low",
   limits: {
     maxInputTokensPerSession: 2_000_000,
     sessionTimeoutMs: 30 * 24 * 60 * 60 * 1000,
