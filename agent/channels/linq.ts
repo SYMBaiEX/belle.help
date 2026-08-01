@@ -43,13 +43,23 @@ export const { bot, channel, send } = chatSdkChannel({
   streaming: false,
 });
 
-/** Phone handle of the sender, from the Chat SDK author identity. */
+/**
+ * Phone handle (or email) of the sender.
+ *
+ * The Linq adapter maps `sender_handle.id` -> `author.userId` and
+ * `sender_handle.handle` -> `author.userName`, so the PHONE NUMBER lives on
+ * `userName`; `userId` is an opaque handle UUID. Prefer whichever field
+ * actually looks like an E.164 number or an email so the stored phone hash and
+ * last-4 digits are meaningful, and fall back to the stable id otherwise.
+ */
 function senderHandle(message: Message): string | null {
-  const raw = message.author?.userId ?? message.author?.userName ?? null;
-  if (!raw) return null;
-  // Linq handles are E.164 phone numbers or emails; strip any adapter prefix.
-  const cleaned = raw.replace(/^linq:/, "");
-  return cleaned.length > 0 ? cleaned : null;
+  const candidates = [message.author?.userName, message.author?.userId];
+  const cleaned = candidates
+    .filter((v): v is string => typeof v === "string" && v.length > 0)
+    .map((v) => v.replace(/^linq:/, ""));
+
+  const identifier = cleaned.find((v) => /^\+?\d{7,15}$/.test(v) || v.includes("@"));
+  return identifier ?? cleaned[0] ?? null;
 }
 
 async function alreadyProcessed(messageId: string): Promise<boolean> {
