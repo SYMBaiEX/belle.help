@@ -3,7 +3,7 @@ import { api } from "@/convex/_generated/api";
 import { getSessionUser } from "@/lib/auth/session";
 import { apiError, apiOk } from "@/lib/api/respond";
 import { rateLimit } from "@/lib/auth/rate-limit";
-import { listInstallationRepositories } from "@/lib/github/sync";
+import { syncRepositoriesWorkflow } from "@/app/workflows/sync-repositories";
 
 /**
  * Re-sync every active GitHub App installation the session user has, e.g.
@@ -31,16 +31,11 @@ export async function POST() {
   for (const installation of installations) {
     if (installation.status !== "active") continue;
     try {
-      const repos = await listInstallationRepositories(installation.installationId);
-      const result = await fetchMutation(api.githubSync.syncRepositories, {
+      // Durable: each GitHub page and each Convex write is a checkpointed,
+      // independently retried step that outlives this request.
+      const result = await syncRepositoriesWorkflow({
         userId: session.userId,
         installationId: installation.installationId,
-        repos: repos.map((r) => ({
-          owner: r.owner,
-          name: r.name,
-          fullName: r.fullName,
-          defaultBranch: r.defaultBranch,
-        })),
       });
       added += result.added;
       updated += result.updated;

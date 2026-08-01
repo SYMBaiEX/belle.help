@@ -21,7 +21,41 @@ A real `pull_request` event for `SYMBaiEX/doolittle#2` was received, recorded in
 Both are fixed. The remaining question: how do we make this class of failure
 structurally impossible rather than relying on having found this one?
 
-## Considered: adopt the Vercel Workflow SDK directly
+## Update (2026-08-01): Workflow SDK adopted for the Next.js tree
+
+The dependency objection below turned out to be theoretical for this codebase,
+and the owner explicitly chose to run the latest tooling. Re-tested:
+
+- We import only `createOctokit` from `@github-tools/sdk`; its `workflow`
+  subpath is never used, so its `peerOptional workflow@^4.5.0` is unexercised.
+  Pinning `overrides.workflow = 5.0.0-beta.34` (matching eve's
+  `@workflow/world-vercel`) installs cleanly, and typecheck, tests, the Next
+  build, and the eve build all pass.
+- `withWorkflow(withEve(nextConfig))` composes. The loader reports
+  `Compiled workflows (1 workflow)` and mounts `/.well-known/workflow/v1/*`.
+
+**The real constraint is not the dependency — it is eve's build guard.**
+`assertNoWorkflowDirectivePrologue` rejects any authored module under
+`agent/**` containing a `"use step"` or `"use workflow"` directive:
+"Workflow directives are reserved for eve-generated workflow entrypoints."
+
+So Workflow is usable in the Next.js tree only. Agent-side work (channel hooks,
+the code-fixer pipeline, deferred actions raised from a turn) cannot be
+expressed as directives and keeps the at-least-once design below.
+
+First adoption: `app/workflows/sync-repositories.ts`. Repository sync fans out
+over paginated GitHub calls before writing to Convex — all-or-nothing and
+invocation-bounded as a plain request. Each hop is now a checkpointed,
+independently retried step. It was chosen deliberately as the proving ground:
+real durability benefit, off the critical texting path.
+
+Next candidates, in order: deferred actions (an app-tree workflow using
+`sleep()` for "merge after 3 PM" and watch expiry, triggered by the agent over
+HTTP — this would retire the `scheduledActions` polling table), then webhook
+ingestion, which additionally requires taking over Connect's OIDC webhook
+verification and so carries real security risk.
+
+## Originally considered: adopt the Vercel Workflow SDK directly
 
 `"use workflow"` / `"use step"` gives durable, independently retried steps that
 survive invocation termination, plus `sleep()` — a clean fit for webhook

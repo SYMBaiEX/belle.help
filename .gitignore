@@ -15,3 +15,4 @@ docs/research/linq-llms-full.txt
 
 # .env.example IS committed; all other env files are not
 !.env.example
+/.swc

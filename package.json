@@ -29,6 +29,7 @@
     "next": "^16.2.12",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "workflow": "^5.0.0-beta.34",
     "zod": "4.4.3"
   },
   "devDependencies": {
@@ -42,7 +43,8 @@
     "vitest": "^4.1.10"
   },
   "overrides": {
-    "ai": "^7.0.38"
+    "ai": "^7.0.38",
+    "workflow": "5.0.0-beta.34"
   },
   "engines": {
     "node": "24.x"
