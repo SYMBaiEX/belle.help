@@ -153,6 +153,55 @@ optional `AI_GATEWAY_API_KEY` (local dev only).
    agent/tool layer per repository `reviewPolicy`; a hard server-side gate on
    `submit_review` content classification is future work.
 
+
+## Operational learnings (2026-08-01, first live day)
+
+Five failures found by running the thing for real. Each was invisible in tests
+and obvious only from production evidence.
+
+**1. Convex rejects undeclared arguments — silently, as "Server Error".**
+Seven call sites passed fields their validators didn't declare (`receivedAt`,
+`createdAt`, a wrong-shaped `markSent`). Because `agent/lib/convex.ts`
+addresses functions by string name, TypeScript could not catch any of it. The
+first one broke inbound texting completely: the webhook arrived, the mutation
+threw, Belle never replied. Guarded now by `tests/unit/convex-call-sites.test.ts`,
+which parses every call site — including the `anyApi.mod!.fn!` form used in the
+Workflow files, and keys written alongside a spread.
+
+**2. `session.failed` is terminal, and expected errors were reaching it.**
+Eve cascades `step.failed → turn.failed → session.failed`, and a dead session
+means the next message starts with no history — users read that as amnesia.
+Tools were throwing for ordinary conditions ("repository not configured"), so
+asking about an unconnected repo destroyed a weeks-long conversation. Expected
+conditions now return `{ ok: false, message }`.
+
+**3. Nothing ever wrote to the memory table.** `get_repository_context` read
+from `memories`; no code path wrote to it. Combined with compaction, every
+stated preference was eventually lost. Belle now has a `remember` tool and
+reads memory back in `get_user_context`.
+
+**4. Fire-and-forget work dies with the invocation.** A `void handlePrEvent(...)`
+in an awaited eve hook was killed mid-flight after the dedup row was written
+but before the notification — and the stranded row then made every GitHub
+redelivery look like a duplicate, so the retry that should have rescued it was
+discarded. Only a run that reaches `processed` may now suppress a redelivery.
+
+**5. `vercel env pull` masks sensitive values as the literal string
+`[SENSITIVE]`.** This silently broke a local Convex CLI invocation and a
+credential test, producing errors that looked like auth failures. Never debug
+against a pulled env file without checking for that sentinel.
+
+Two smaller ones worth remembering: eve normalizes `GitHubPullRequestEvent.raw`
+to the `pull_request` object itself (not the delivery envelope), so
+`raw.pull_request` always missed and notifications shipped with placeholder
+titles; and eve's build **rejects** `"use step"`/`"use workflow"` anywhere under
+`agent/**`, which is why Workflow adoption is confined to the Next.js tree.
+
+A meta-lesson: a guard that passes proves nothing until you have watched it
+fail on the case it exists to catch. The Convex guard passed while blind to ten
+call sites and to any key following a shorthand property; both gaps surfaced
+only from deliberate negative tests.
+
 ## MVP checklist vs. spec (§44)
 
 Items 1–33 implemented in code; item 34 (production deployment) blocked on
