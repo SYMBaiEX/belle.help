@@ -22,9 +22,9 @@ export async function GET(req: NextRequest) {
 
   const verified = verifyInstallState(state);
   if (!verified) {
-    return NextResponse.redirect(new URL("/dashboard/repositories?error=invalid_state", req.url), {
-      status: 401,
-    });
+    // A redirect must carry a 3xx status — `401` throws at runtime. The user
+    // still lands on an error page; nothing is granted without valid state.
+    return NextResponse.redirect(new URL("/dashboard/repositories?error=invalid_state", req.url));
   }
 
   const installationId = installationIdRaw ? Number(installationIdRaw) : NaN;
