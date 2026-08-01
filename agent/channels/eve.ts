@@ -1,7 +1,9 @@
 import { eveChannel } from "eve/channels/eve";
 import { localDev, vercelOidc, type AuthFn } from "eve/channels/auth";
 
-import { verifySessionCookie } from "../../lib/auth/session";
+// Import the pure-crypto module, not ../../lib/auth/session — the latter
+// pulls in `next/headers`, which the Eve agent bundle cannot resolve.
+import { verifySessionCookie } from "../../lib/auth/session-token";
 
 /**
  * Web/API channel auth for the embedded Eve routes (dashboard chat, session

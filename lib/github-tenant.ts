@@ -1,4 +1,4 @@
-import { Octokit } from "@github-tools/sdk";
+import { createOctokit, type Octokit } from "@github-tools/sdk";
 import { getToken } from "@vercel/connect";
 import { ConvexHttpClient } from "convex/browser";
 import { anyApi } from "convex/server";
@@ -130,5 +130,5 @@ export async function octokitForTenant(
 ): Promise<Octokit> {
   const repository = await tenantRepository(ctx, repositoryFullName);
   const token = await mintInstallationToken(repository.installationId);
-  return new Octokit({ auth: token });
+  return createOctokit(token);
 }
