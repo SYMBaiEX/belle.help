@@ -53,7 +53,13 @@ interface PrMeta {
 }
 
 function prMetaFromRaw(raw: Record<string, unknown>, pullRequestNumber: number, headSha: string | null): PrMeta {
-  const pr = (raw.pull_request ?? {}) as Record<string, unknown>;
+  // eve normalizes `raw` to the `pull_request` object itself, not the whole
+  // webhook delivery. Reading `raw.pull_request` therefore always missed, and
+  // notifications went out as "#2 PR #2 / Opened by unknown". Accept both
+  // shapes so this survives either normalization.
+  const pr = (
+    typeof raw.pull_request === "object" && raw.pull_request !== null ? raw.pull_request : raw
+  ) as Record<string, unknown>;
   const user = (pr.user ?? {}) as Record<string, unknown>;
   const base = (pr.base ?? {}) as Record<string, unknown>;
   const head = (pr.head ?? {}) as Record<string, unknown>;
