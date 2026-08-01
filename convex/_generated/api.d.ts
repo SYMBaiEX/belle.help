@@ -37,6 +37,7 @@ import type * as reviewFindings from "../reviewFindings.js";
 import type * as reviewRuns from "../reviewRuns.js";
 import type * as reviewRunsExtra from "../reviewRunsExtra.js";
 import type * as scheduledActions from "../scheduledActions.js";
+import type * as shortLinks from "../shortLinks.js";
 import type * as usageEvents from "../usageEvents.js";
 import type * as userSettings from "../userSettings.js";
 import type * as users from "../users.js";
@@ -78,6 +79,7 @@ declare const fullApi: ApiFromModules<{
   reviewRuns: typeof reviewRuns;
   reviewRunsExtra: typeof reviewRunsExtra;
   scheduledActions: typeof scheduledActions;
+  shortLinks: typeof shortLinks;
   usageEvents: typeof usageEvents;
   userSettings: typeof userSettings;
   users: typeof users;

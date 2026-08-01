@@ -1,7 +1,11 @@
 import { getSessionUser } from "@/lib/auth/session";
 import { OnboardingFlow } from "@/components/onboarding/OnboardingFlow";
 
-export const metadata = { title: "Set up Belle" };
+export const metadata = {
+  title: "Finish setting up Belle",
+  description:
+    "Connect GitHub and choose the repositories Belle should watch.",
+};
 
 export default async function OnboardingPage({
   searchParams,

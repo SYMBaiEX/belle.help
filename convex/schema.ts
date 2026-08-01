@@ -384,6 +384,21 @@ export default defineSchema({
     passwordChangedAt: v.optional(v.number()),
   }).index("by_email", ["email"]),
 
+  shortLinks: defineTable({
+    code: v.string(),
+    target: v.string(),
+    kind: v.union(
+      v.literal("onboarding"),
+      v.literal("github_connect"),
+      v.literal("dashboard"),
+    ),
+    userId: v.optional(v.id("users")),
+    createdAt: v.number(),
+    expiresAt: v.optional(v.number()),
+    usedAt: v.optional(v.number()),
+    useCount: v.number(),
+  }).index("by_code", ["code"]),
+
   accessRequests: defineTable({
     userId: v.optional(v.id("users")),
     phoneIdentityId: v.id("phoneIdentities"),
