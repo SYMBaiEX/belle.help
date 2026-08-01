@@ -29,7 +29,7 @@
     "next": "^16.2.12",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "workflow": "^5.0.0-beta.34",
+    "workflow": "5.0.0-beta.38",
     "zod": "4.4.3"
   },
   "devDependencies": {
@@ -44,7 +44,9 @@
   },
   "overrides": {
     "ai": "^7.0.38",
-    "workflow": "5.0.0-beta.34"
+    "@github-tools/sdk": {
+      "workflow": "$workflow"
+    }
   },
   "engines": {
     "node": "24.x"
