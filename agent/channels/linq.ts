@@ -97,9 +97,21 @@ async function handleInbound(thread: Thread, message: Message): Promise<void> {
     identity = { _id: id, userId: null };
   }
 
-  // ── Onboarding path: unknown or not-yet-linked number ──────────────────
-  if (!identity || !identity.userId) {
-    await sendOnboarding(thread, linqChatId, identity?._id ?? null, phoneHash);
+  if (!identity) return; // no resolvable identity (shouldn't happen)
+
+  // ── Invite-only gate ───────────────────────────────────────────────────
+  // Belle is invite-only. Every phone identity needs an approved access
+  // request before any message reaches the model. Pending users may still
+  // complete web onboarding so they are ready the moment they're approved.
+  const access = await resolveAccess(identity, linqChatId, handle, text);
+  if (access.status !== "approved") {
+    await handlePendingAccess(thread, access, linqChatId, identity._id, phoneHash);
+    return;
+  }
+
+  // ── Approved but not yet onboarded: send the setup link ────────────────
+  if (!identity.userId) {
+    await sendOnboarding(thread, linqChatId, identity._id, phoneHash, "approved");
     return;
   }
 
@@ -126,15 +138,108 @@ async function handleInbound(thread: Thread, message: Message): Promise<void> {
   });
 }
 
-async function sendOnboarding(
+interface AccessRequest {
+  _id: string;
+  status: "pending" | "approved" | "denied";
+  lastNudgeAt?: number;
+  created?: boolean;
+}
+
+/** How long to wait before re-reminding a pending user (ms). */
+const NUDGE_INTERVAL_MS = 12 * 60 * 60 * 1000;
+
+/**
+ * Resolve this phone identity's access state, creating the pending request on
+ * the very first inbound message. An approved user record (e.g. someone who
+ * redeemed an invite code during onboarding) also grants access.
+ */
+async function resolveAccess(
+  identity: { _id: string; userId: string | null },
+  linqChatId: string,
+  handle: string | null,
+  firstMessageText: string,
+): Promise<AccessRequest> {
+  if (identity.userId) {
+    const approval = (await db.query("users:getApprovalStatus", {
+      userId: identity.userId,
+    })) as { approvalStatus?: string } | null;
+    if (approval?.approvalStatus === "approved") {
+      return { _id: "user-approved", status: "approved" };
+    }
+  }
+
+  const existing = (await db.query("accessRequests:getByPhoneIdentity", {
+    phoneIdentityId: identity._id,
+  })) as AccessRequest | null;
+  if (existing) return existing;
+
+  const created = (await db.mutation("accessRequests:createIfNew", {
+    phoneIdentityId: identity._id,
+    phoneLast4: handle ? last4(handle) : "----",
+    linqChatId,
+    firstMessagePreview: firstMessageText.slice(0, 140),
+  })) as { requestId: string; status: AccessRequest["status"]; created: boolean };
+
+  await recordAudit({
+    actor: "system",
+    action: "access.requested",
+    detail: `New access request from conversation ${linqChatId}`,
+  });
+
+  return { _id: created.requestId, status: created.status, created: created.created };
+}
+
+/**
+ * Pending/denied users never reach the model. First contact gets the full
+ * invite-only explanation plus a setup link (they can complete onboarding
+ * while waiting); later messages get a throttled reminder at most twice a day.
+ */
+async function handlePendingAccess(
   thread: Thread,
+  access: AccessRequest,
+  linqChatId: string,
+  phoneIdentityId: string,
+  phoneHash: string | null,
+): Promise<void> {
+  if (access.status === "denied") return; // stay silent for denied numbers
+
+  const isFirstContact = access.created === true;
+  const nudgedRecently =
+    typeof access.lastNudgeAt === "number" && Date.now() - access.lastNudgeAt < NUDGE_INTERVAL_MS;
+  if (!isFirstContact && nudgedRecently) return;
+
+  const link = await mintOnboardingLink(linqChatId, phoneIdentityId, phoneHash);
+
+  if (isFirstContact) {
+    await thread.post(
+      "Hey, I'm Belle — your GitHub agent. I watch repositories, review pull requests, " +
+        "investigate CI failures, fix approved issues, and help you merge safely.",
+    );
+    await thread.post(
+      "Belle is invite-only right now, so you're on the list and pending approval. " +
+        "You can finish setup now so you're ready the moment you're approved — and if " +
+        "you have an invite code, enter it there and you're in immediately:",
+    );
+  } else {
+    await thread.post(
+      "Still pending approval — I'll text you the moment you're in. " +
+        "You can finish setup (or redeem an invite code) meanwhile:",
+    );
+  }
+  await thread.post(link);
+
+  if (access._id !== "user-approved") {
+    await db.mutation("accessRequests:markNudged", { requestId: access._id });
+  }
+}
+
+/** Create a signed, single-use, short-lived onboarding URL. */
+async function mintOnboardingLink(
   linqChatId: string,
   phoneIdentityId: string | null,
   phoneHash: string | null,
-): Promise<void> {
+): Promise<string> {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://belle.help";
-
-  // Signed, short-lived, single-use link bound to this conversation + phone.
   const { token, tokenHash, expiresAt } = createOnboardingToken({
     linqChatId,
     phoneHash: phoneHash ?? "unknown",
@@ -149,19 +254,38 @@ async function sendOnboarding(
       expiresAt,
     });
   }
+  return `${appUrl}/onboarding?token=${token}`;
+}
+
+async function sendOnboarding(
+  thread: Thread,
+  linqChatId: string,
+  phoneIdentityId: string | null,
+  phoneHash: string | null,
+  mode: "new" | "approved" = "new",
+): Promise<void> {
+  const link = await mintOnboardingLink(linqChatId, phoneIdentityId, phoneHash);
 
   // Greeting first, link second — Linq rejects links in a chat-creating
   // message, and splitting keeps both readable over SMS.
-  await thread.post(
-    "Hey, I'm Belle. I can watch your GitHub repositories, review pull requests, " +
-      "investigate CI failures, fix approved issues, and help you merge safely.",
-  );
-  await thread.post(`Finish setup here:\n${appUrl}/onboarding?token=${token}`);
+  if (mode === "approved") {
+    await thread.post(
+      "You're approved! Finish setting up and I'll get to work — connect GitHub and " +
+        "pick the repositories you want me watching:",
+    );
+  } else {
+    await thread.post(
+      "Hey, I'm Belle. I can watch your GitHub repositories, review pull requests, " +
+        "investigate CI failures, fix approved issues, and help you merge safely.",
+    );
+    await thread.post("Finish setup here:");
+  }
+  await thread.post(link);
 
   await recordAudit({
     actor: "system",
     action: "onboarding.link_sent",
-    detail: `Onboarding link sent to conversation ${linqChatId}`,
+    detail: `Onboarding link sent to conversation ${linqChatId} (${mode})`,
   });
 }
 

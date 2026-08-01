@@ -36,3 +36,33 @@ export const softDelete = mutation({
     await ctx.db.patch(args.userId, { deletedAt: Date.now() });
   },
 });
+
+export const setApprovalStatus = mutation({
+  args: {
+    userId: v.id("users"),
+    approvalStatus: v.union(
+      v.literal("pending"),
+      v.literal("approved"),
+      v.literal("denied"),
+    ),
+    approvedBy: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.userId, {
+      approvalStatus: args.approvalStatus,
+      approvedAt: args.approvalStatus === "approved" ? Date.now() : undefined,
+      approvedBy: args.approvedBy,
+    });
+  },
+});
+
+export const getApprovalStatus = query({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.userId);
+    return {
+      approvalStatus: user?.approvalStatus ?? null,
+      inviteCodeUsed: user?.inviteCodeUsed ?? null,
+    };
+  },
+});

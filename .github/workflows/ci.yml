@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Deterministic dummy key so crypto-dependent modules can be imported in CI.
+  # Never a real secret: production keys live in Vercel/Convex env only.
+  APP_ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+
+jobs:
+  verify:
+    name: Typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+        env:
+          # Public, non-secret: the production Convex deployment URL.
+          NEXT_PUBLIC_CONVEX_URL: ${{ vars.NEXT_PUBLIC_CONVEX_URL }}
+
+  convex:
+    name: Deploy Convex functions
+    needs: verify
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24.x
+          cache: npm
+
+      - run: npm ci
+
+      # Skips cleanly until CONVEX_DEPLOY_KEY is added in repo secrets
+      # (Convex dashboard -> Settings -> Deploy Keys -> Production).
+      - name: Deploy to Convex production
+        if: ${{ env.CONVEX_DEPLOY_KEY != '' }}
+        run: npx convex deploy -y
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+
+      - name: Note when Convex deploy is skipped
+        if: ${{ env.CONVEX_DEPLOY_KEY == '' }}
+        run: echo "CONVEX_DEPLOY_KEY not set — skipping Convex deploy. Add it in repo secrets to enable."
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}

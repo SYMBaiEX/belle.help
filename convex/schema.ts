@@ -12,6 +12,12 @@ export default defineSchema({
     aiMode: v.union(v.literal("byok"), v.literal("managed")),
     createdAt: v.number(),
     deletedAt: v.optional(v.number()),
+    approvalStatus: v.optional(
+      v.union(v.literal("pending"), v.literal("approved"), v.literal("denied")),
+    ),
+    approvedAt: v.optional(v.number()),
+    approvedBy: v.optional(v.string()),
+    inviteCodeUsed: v.optional(v.string()),
   }),
 
   phoneIdentities: defineTable({
@@ -356,4 +362,47 @@ export default defineSchema({
   })
     .index("by_status", ["status"])
     .index("by_userId", ["userId"]),
+
+  inviteCodes: defineTable({
+    code: v.string(),
+    createdBy: v.string(),
+    note: v.optional(v.string()),
+    maxUses: v.number(),
+    usedCount: v.number(),
+    expiresAt: v.optional(v.number()),
+    revokedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  }).index("by_code", ["code"]),
+
+  adminUsers: defineTable({
+    email: v.string(),
+    passwordHash: v.string(),
+    passwordSalt: v.string(),
+    mustChangePassword: v.boolean(),
+    createdAt: v.number(),
+    lastLoginAt: v.optional(v.number()),
+    passwordChangedAt: v.optional(v.number()),
+  }).index("by_email", ["email"]),
+
+  accessRequests: defineTable({
+    userId: v.optional(v.id("users")),
+    phoneIdentityId: v.id("phoneIdentities"),
+    phoneLast4: v.string(),
+    linqChatId: v.string(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("approved"),
+      v.literal("denied"),
+    ),
+    firstMessageAt: v.number(),
+    firstMessagePreview: v.optional(v.string()),
+    lastNudgeAt: v.optional(v.number()),
+    resolvedAt: v.optional(v.number()),
+    resolvedBy: v.optional(v.string()),
+    approvedNotifiedAt: v.optional(v.number()),
+    note: v.optional(v.string()),
+  })
+    .index("by_status", ["status"])
+    .index("by_phoneIdentityId", ["phoneIdentityId"])
+    .index("by_linqChatId", ["linqChatId"]),
 });

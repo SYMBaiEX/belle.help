@@ -3,17 +3,19 @@ import { api } from "@/convex/_generated/api";
 import { requireSessionUser } from "@/lib/auth/session";
 import { Card, PageHeading, EmptyState } from "@/components/dashboard/ui";
 import { ApprovalInlineActions } from "@/components/dashboard/ApprovalInlineActions";
+import { PendingApprovalBanner } from "@/components/PendingApprovalBanner";
 
 export const metadata = { title: "Overview — Belle" };
 
 export default async function OverviewPage() {
   const { userId } = await requireSessionUser();
 
-  const [repositories, openPrs, pending, activity] = await Promise.all([
+  const [repositories, openPrs, pending, activity, approval] = await Promise.all([
     fetchQuery(api.repositories.listByUser, { userId }),
     fetchQuery(api.pullRequests.listOpenByUser, { userId }),
     fetchQuery(api.approvals.getPending, { userId }),
     fetchQuery(api.auditExtra.listByUserPaginated, { userId, limit: 10 }),
+    fetchQuery(api.users.getApprovalStatus, { userId }),
   ]);
 
   const watchedCount = repositories.filter((r) => r.watchEnabled).length;
@@ -21,6 +23,7 @@ export default async function OverviewPage() {
   return (
     <div>
       <PageHeading title="Overview" subtitle="What Belle is watching and waiting on." />
+      {approval.approvalStatus === "pending" ? <PendingApprovalBanner /> : null}
 
       <div className="grid gap-4 sm:grid-cols-3">
         <Card>

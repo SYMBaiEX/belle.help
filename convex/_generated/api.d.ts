@@ -8,7 +8,10 @@
  * @module
  */
 
+import type * as accessRequests from "../accessRequests.js";
 import type * as accountDeletion from "../accountDeletion.js";
+import type * as adminQueries from "../adminQueries.js";
+import type * as adminUsers from "../adminUsers.js";
 import type * as approvals from "../approvals.js";
 import type * as approvalsExtra from "../approvalsExtra.js";
 import type * as audit from "../audit.js";
@@ -18,6 +21,7 @@ import type * as digests from "../digests.js";
 import type * as encryptedCredentials from "../encryptedCredentials.js";
 import type * as fixRuns from "../fixRuns.js";
 import type * as githubInstallations from "../githubInstallations.js";
+import type * as inviteCodes from "../inviteCodes.js";
 import type * as memories from "../memories.js";
 import type * as notificationPreferences from "../notificationPreferences.js";
 import type * as onboarding from "../onboarding.js";
@@ -44,7 +48,10 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  accessRequests: typeof accessRequests;
   accountDeletion: typeof accountDeletion;
+  adminQueries: typeof adminQueries;
+  adminUsers: typeof adminUsers;
   approvals: typeof approvals;
   approvalsExtra: typeof approvalsExtra;
   audit: typeof audit;
@@ -54,6 +61,7 @@ declare const fullApi: ApiFromModules<{
   encryptedCredentials: typeof encryptedCredentials;
   fixRuns: typeof fixRuns;
   githubInstallations: typeof githubInstallations;
+  inviteCodes: typeof inviteCodes;
   memories: typeof memories;
   notificationPreferences: typeof notificationPreferences;
   onboarding: typeof onboarding;

@@ -54,6 +54,15 @@ export function OnboardingFlow({
 
   const [confirmationText, setConfirmationText] = useState<string | null>(null);
 
+  // Invite-only access: offered right after token verification (the "ai"
+  // step is the first step reached once verify() succeeds). Redeeming a
+  // code approves the account immediately; skipping it leaves the account
+  // pending — onboarding still continues through every remaining step.
+  const [inviteCode, setInviteCode] = useState("");
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteApproved, setInviteApproved] = useState(false);
+
   useEffect(() => {
     if (!signedIn && !token) {
       setStep("error");
@@ -83,6 +92,29 @@ export function OnboardingFlow({
       setStep("error");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function redeemInvite() {
+    if (!inviteCode.trim()) return;
+    setInviteBusy(true);
+    setInviteError(null);
+    try {
+      const res = await fetch("/api/onboarding/invite", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code: inviteCode.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setInviteError(data.error?.message ?? "That code didn't work.");
+        return;
+      }
+      setInviteApproved(true);
+    } catch {
+      setInviteError("Something went wrong reaching Belle. Try again in a moment.");
+    } finally {
+      setInviteBusy(false);
     }
   }
 
@@ -207,6 +239,14 @@ export function OnboardingFlow({
         </Panel>
       ) : step === "ai" ? (
         <Panel>
+          <InviteCodeSection
+            code={inviteCode}
+            onCodeChange={setInviteCode}
+            onRedeem={redeemInvite}
+            busy={inviteBusy}
+            error={inviteError}
+            approved={inviteApproved}
+          />
           <StepHeading title="How should I run AI?" />
           <div className="mt-5 space-y-3">
             <ModeCard
@@ -450,6 +490,73 @@ function ModeCard({
         {body}
       </p>
     </button>
+  );
+}
+
+function InviteCodeSection({
+  code,
+  onCodeChange,
+  onRedeem,
+  busy,
+  error,
+  approved,
+}: {
+  code: string;
+  onCodeChange: (value: string) => void;
+  onRedeem: () => void;
+  busy: boolean;
+  error: string | null;
+  approved: boolean;
+}) {
+  if (approved) {
+    return (
+      <div
+        className="mb-5 rounded-xl border px-3.5 py-3 text-sm"
+        style={{ borderColor: "var(--color-border)", background: "var(--color-success-soft)", color: "var(--color-success)" }}
+      >
+        You&apos;re approved — Belle is live for you.
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="mb-5 rounded-xl border p-4"
+      style={{ borderColor: "var(--color-border)", background: "var(--color-bg-elevated)" }}
+    >
+      <p className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>
+        Have an invite code?
+      </p>
+      <div className="mt-2 flex gap-2">
+        <input
+          type="text"
+          value={code}
+          onChange={(e) => onCodeChange(e.target.value)}
+          placeholder="BELLE-XXXX-XXXX"
+          className="min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm outline-none"
+          style={{ borderColor: "var(--color-border)", background: "var(--color-bg)", color: "var(--color-ink)" }}
+        />
+        <button
+          type="button"
+          onClick={onRedeem}
+          disabled={busy || !code.trim()}
+          className="shrink-0 rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50"
+          style={{ background: "var(--color-accent)", color: "var(--color-accent-ink)" }}
+        >
+          {busy ? "Checking…" : "Redeem"}
+        </button>
+      </div>
+      {error ? (
+        <p className="mt-2 text-xs" style={{ color: "var(--color-danger)" }}>
+          {error}
+        </p>
+      ) : (
+        <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--color-ink-muted)" }}>
+          You&apos;re on the list. I&apos;ll text you the moment you&apos;re approved — you can
+          finish setup now so you&apos;re ready to go.
+        </p>
+      )}
+    </div>
   );
 }
 

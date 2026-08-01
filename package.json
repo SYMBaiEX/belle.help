@@ -13,7 +13,8 @@
     "eve:dev": "eve dev",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "seed:admin": "node scripts/seed-admin.mjs"
   },
   "dependencies": {
     "@chat-adapter/state-memory": "^4.36.0",

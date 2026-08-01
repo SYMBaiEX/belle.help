@@ -9,3 +9,9 @@ dist
 .DS_Store
 *.tsbuildinfo
 .convex
+
+# Third-party documentation dumps (not redistributed)
+docs/research/linq-llms-full.txt
+
+# .env.example IS committed; all other env files are not
+!.env.example

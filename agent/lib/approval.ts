@@ -46,6 +46,20 @@ export async function decideBelleApproval(ctx: ApprovalContext): Promise<Approva
     return { type: "denied", reason: "This session is not pinned to a single Belle user." };
   }
 
+  // Invite-only: an unapproved account can read its own data but may never
+  // take an action that touches GitHub. The Linq channel already gates
+  // messages; this covers the dashboard/web surface too.
+  const approval = (await db.query("users:getApprovalStatus", {
+    userId: current.principalId,
+  })) as { approvalStatus?: string } | null;
+  if (approval && approval.approvalStatus !== "approved") {
+    return {
+      type: "denied",
+      reason:
+        "This Belle account is still pending access approval, so external actions are disabled.",
+    };
+  }
+
   const input = (ctx.toolInput ?? {}) as Record<string, unknown>;
 
   // Model input can never select another tenant.
