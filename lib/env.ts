@@ -27,6 +27,7 @@ const envSchema = z.object({
   CONVEX_DEPLOYMENT: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   AI_GATEWAY_API_KEY: z.string().optional(),
+  REDIS_URL: z.string().optional(),
   ADMIN_EMAIL: z.string().optional(),
   ADMIN_INITIAL_PASSWORD: z.string().optional(),
   ADMIN_SEED_TOKEN: z.string().optional(),

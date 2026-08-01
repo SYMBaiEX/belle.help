@@ -1,4 +1,5 @@
 import { createMemoryState } from "@chat-adapter/state-memory";
+import { createRedisState } from "@chat-adapter/state-redis";
 import { createLinqAdapter } from "@linqapp/chat-sdk-adapter";
 import type { Message, Thread } from "chat";
 import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
@@ -34,12 +35,33 @@ function linqEnv(): { apiKey: string; signingSecret: string; baseURL?: string } 
   };
 }
 
+/**
+ * Durable Chat SDK state.
+ *
+ * The in-memory adapter loses thread subscriptions, locks, and the history
+ * cache on every cold instance, so state silently reset whenever traffic
+ * paused. Redis keeps it shared across invocations.
+ *
+ * createRedisState() throws when REDIS_URL is unset, and eve evaluates this
+ * module at BUILD time — so a missing variable would fail the build rather
+ * than the request. Fall back to memory with a loud warning instead: local
+ * dev and CI builds should not require a Redis instance.
+ */
+function chatState() {
+  if (process.env.REDIS_URL) return createRedisState();
+  console.warn(
+    "[linq-channel] REDIS_URL is not set — using in-memory Chat SDK state. " +
+      "Thread state will not survive cold starts. Do not run production this way.",
+  );
+  return createMemoryState();
+}
+
 export const { bot, channel, send } = chatSdkChannel({
   userName: "Belle",
   adapters: {
     linq: createLinqAdapter(linqEnv()),
   },
-  state: createMemoryState(),
+  state: chatState(),
   // Texting surfaces deliver one message per turn; no post-then-edit streaming.
   streaming: false,
 });

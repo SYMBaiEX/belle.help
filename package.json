@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@chat-adapter/state-memory": "^4.36.0",
+    "@chat-adapter/state-redis": "^4.36.0",
     "@github-tools/sdk": "^1.8.2",
     "@linqapp/chat-sdk-adapter": "^0.1.0",
     "@vercel/connect": "0.4.3",
