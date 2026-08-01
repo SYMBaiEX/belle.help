@@ -58,7 +58,6 @@ async function alreadyProcessed(messageId: string): Promise<boolean> {
     externalEventId: messageId,
     eventType: "message.received",
     verified: true,
-    receivedAt: Date.now(),
   })) as { duplicate: boolean };
   return result.duplicate;
 }
@@ -92,7 +91,6 @@ async function handleInbound(thread: Thread, message: Message): Promise<void> {
       phoneHash,
       phoneLast4: last4(handle),
       linqChatId,
-      createdAt: Date.now(),
     })) as string;
     identity = { _id: id, userId: null };
   }
@@ -119,7 +117,6 @@ async function handleInbound(thread: Thread, message: Message): Promise<void> {
   await db.mutation("conversationContexts:upsert", {
     userId: identity.userId,
     linqChatId,
-    updatedAt: Date.now(),
   });
 
   await send(messageToUserContent(message), {
@@ -250,8 +247,7 @@ async function mintOnboardingLink(
       tokenHash,
       phoneIdentityId,
       linqChatId,
-      createdAt: Date.now(),
-      expiresAt,
+      ttlMs: Math.max(0, expiresAt - Date.now()),
     });
   }
   return `${appUrl}/onboarding?token=${token}`;

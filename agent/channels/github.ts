@@ -77,7 +77,6 @@ async function dedupe(externalEventId: string, eventType: string): Promise<boole
     externalEventId,
     eventType,
     verified: true,
-    receivedAt: Date.now(),
   })) as { duplicate: boolean };
   return result.duplicate;
 }
@@ -94,7 +93,6 @@ async function notifyUser(userId: string, text: string, idempotencyKey: string):
     linqChatId: ctx.linqChatId,
     idempotencyKey,
     body: text,
-    createdAt: Date.now(),
   })) as { duplicate: boolean; id?: string };
   if (recorded.duplicate) return;
 
@@ -103,14 +101,10 @@ async function notifyUser(userId: string, text: string, idempotencyKey: string):
     return;
   }
   try {
-    const result = await sendText(ctx.linqChatId, text, { idempotencyKey });
-    await db.mutation("outboundMessages:markSent", {
-      idempotencyKey,
-      traceId: result.traceId,
-      sentAt: Date.now(),
-    });
+    await sendText(ctx.linqChatId, text, { idempotencyKey });
+    if (recorded.id) await db.mutation("outboundMessages:markSent", { id: recorded.id });
   } catch (error) {
-    await db.mutation("outboundMessages:markFailed", { idempotencyKey });
+    if (recorded.id) await db.mutation("outboundMessages:markFailed", { id: recorded.id });
     console.error("[github-channel] Linq send failed", error);
   }
 }
@@ -184,8 +178,6 @@ async function handlePrEvent(
       deletions: pr.deletions,
       changedFiles: pr.changedFiles,
       url: `https://github.com/${repoFullName}/pull/${pr.number}`,
-      lastEventAt: Date.now(),
-      createdAt: Date.now(),
     });
 
     // Make "review it" resolve to this PR on the user's next reply.
