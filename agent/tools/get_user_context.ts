@@ -10,12 +10,17 @@ export default defineTool({
   async execute(_input, ctx) {
     const caller = requireTenantCaller(ctx);
 
-    const [user, conversationContext, pendingApprovals, repositories] = await Promise.all([
-      db.query("users:getById", { userId: caller.userId }),
-      db.query("conversationContexts:getByUserId", { userId: caller.userId }),
-      db.query("approvals:getPending", { userId: caller.userId }),
-      db.query("repositories:listByUser", { userId: caller.userId }),
-    ]);
+    const [user, conversationContext, pendingApprovals, repositories, userMemories] =
+      await Promise.all([
+        db.query("users:getById", { userId: caller.userId }),
+        db.query("conversationContexts:getByUserId", { userId: caller.userId }),
+        db.query("approvals:getPending", { userId: caller.userId }),
+        db.query("repositories:listByUser", { userId: caller.userId }),
+        // Durable memory. eve compacts older turns, so anything the user told
+        // Belle earlier only survives if it was written down — read it back
+        // here so reorienting actually restores what was learned.
+        db.query("memories:listByUserAndScope", { userId: caller.userId, scope: "user" }),
+      ]);
 
     const u = user as {
       name?: string;
@@ -46,6 +51,8 @@ export default defineTool({
       watchEnabled: boolean;
     }>) ?? [];
 
+    const memories = (userMemories as Array<{ key: string; value: string }>) ?? [];
+
     return {
       user: {
         name: u?.name,
@@ -53,6 +60,9 @@ export default defineTool({
         aiMode: u?.aiMode,
         defaultMergeMethod: u?.defaultMergeMethod,
       },
+      // Facts Belle previously chose to remember. These survive compaction,
+      // so treat them as authoritative about the user's stated preferences.
+      remembered: memories.map((m) => ({ key: m.key, value: m.value })),
       conversationContext: {
         activeRepositoryFullName: cc?.activeRepositoryFullName,
         activePrNumber: cc?.activePrNumber,

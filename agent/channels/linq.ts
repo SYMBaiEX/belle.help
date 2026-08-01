@@ -139,7 +139,7 @@ async function handleInbound(thread: Thread, message: Message): Promise<void> {
     linqChatId,
   });
 
-  await send(messageToUserContent(message), {
+  const session = await send(messageToUserContent(message), {
     thread,
     auth: {
       authenticator: "linq",
@@ -158,6 +158,20 @@ async function handleInbound(thread: Thread, message: Message): Promise<void> {
   await contextWrite.catch((error) =>
     console.error("[linq-channel] conversationContexts:upsert failed", error),
   );
+
+  // Record which durable session handled this turn. Without it there is no way
+  // to tell a genuinely continuous conversation from one that silently started
+  // over — the difference between "Belle forgot" and "Belle was compacted".
+  if (session?.id) {
+    console.info(`[linq-channel] dispatched to eve session ${session.id}`);
+    await db
+      .mutation("conversationContexts:upsert", {
+        userId: identity.userId,
+        linqChatId,
+        eveSessionId: session.id,
+      })
+      .catch((error) => console.error("[linq-channel] session id write failed", error));
+  }
 }
 
 interface AccessRequest {
