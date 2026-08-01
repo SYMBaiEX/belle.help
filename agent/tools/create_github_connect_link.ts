@@ -2,6 +2,7 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 
 import { createInstallState } from "../../lib/github/state";
+import { createShortLink } from "../../lib/short-links";
 import { recordAudit } from "../lib/convex";
 import { requireTenantCaller } from "../lib/tenant";
 
@@ -33,8 +34,18 @@ export default defineTool({
     }
 
     const ttlMinutes = 30;
-    const state = createInstallState(caller.userId, ttlMinutes * 60 * 1000);
-    const url = `${base}${base.includes("?") ? "&" : "?"}state=${encodeURIComponent(state)}`;
+    const ttlMs = ttlMinutes * 60 * 1000;
+    const state = createInstallState(caller.userId, ttlMs);
+    const target = `${base}${base.includes("?") ? "&" : "?"}state=${encodeURIComponent(state)}`;
+
+    // Shorten so it reads as a tappable link in Messages instead of a long
+    // query string. Never block on the shortener.
+    let url = target;
+    try {
+      url = await createShortLink(target, "github_connect", { userId: caller.userId, ttlMs });
+    } catch (error) {
+      console.error("[create_github_connect_link] short link failed", error);
+    }
 
     await recordAudit({
       userId: caller.userId,

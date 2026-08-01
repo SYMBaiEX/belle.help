@@ -5,6 +5,7 @@ import { chatSdkChannel, messageToUserContent } from "eve/channels/chat-sdk";
 
 import { hashPhone, last4 } from "../../lib/encryption";
 import { createOnboardingToken } from "../../lib/security/onboarding-links";
+import { createShortLink } from "../../lib/short-links";
 import { db, recordAudit } from "../lib/convex";
 
 /**
@@ -240,7 +241,11 @@ async function handlePendingAccess(
   }
 }
 
-/** Create a signed, single-use, short-lived onboarding URL. */
+/**
+ * Create a signed, single-use, short-lived onboarding URL, shortened so it
+ * reads as a tappable link (and renders a preview card) in Messages rather
+ * than a 300-character token blob.
+ */
 async function mintOnboardingLink(
   linqChatId: string,
   phoneIdentityId: string | null,
@@ -260,7 +265,17 @@ async function mintOnboardingLink(
       ttlMs: Math.max(0, expiresAt - Date.now()),
     });
   }
-  return `${appUrl}/onboarding?token=${token}`;
+
+  const target = `${appUrl}/onboarding?token=${token}`;
+  try {
+    return await createShortLink(target, "onboarding", {
+      ttlMs: Math.max(0, expiresAt - Date.now()),
+    });
+  } catch (error) {
+    // Never block onboarding on the shortener — fall back to the full URL.
+    console.error("[linq-channel] short link failed, sending full URL", error);
+    return target;
+  }
 }
 
 async function sendOnboarding(
