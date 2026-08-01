@@ -128,7 +128,9 @@ describe("Convex call sites match their validators", () => {
   it("passes no argument the validator does not declare", () => {
     const violations: string[] = [];
     for (const site of sites) {
-      if (site.spread) continue; // spread args cannot be verified statically
+      // A spread (`{ ...event, createdAt: … }`) hides its own keys from static
+      // analysis, but any literal key written alongside it is still checkable —
+      // and that is exactly how the `audit:record` drift slipped through.
       const declared = decls.get(site.fn);
       if (!declared) continue;
       const extra = site.args.filter((a) => !declared.has(a));

@@ -44,5 +44,7 @@ export async function recordAudit(event: {
   detail?: string;
   refs?: Record<string, unknown>;
 }): Promise<void> {
-  await db.mutation("audit:record", { ...event, createdAt: Date.now() });
+  // `createdAt` is set server-side by the mutation. Convex rejects any
+  // argument its validator does not declare, so do not pass it here.
+  await db.mutation("audit:record", { ...event });
 }
