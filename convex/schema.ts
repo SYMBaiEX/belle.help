@@ -271,9 +271,14 @@ export default defineSchema({
     traceId: v.optional(v.string()),
     createdAt: v.number(),
     sentAt: v.optional(v.number()),
+    // Delivery retries. A message is recorded before it is sent, so a crashed
+    // invocation leaves it "queued" forever; the flush schedule resends those.
+    attempts: v.optional(v.number()),
+    lastAttemptAt: v.optional(v.number()),
   })
     .index("by_linqChatId", ["linqChatId"])
-    .index("by_idempotencyKey", ["idempotencyKey"]),
+    .index("by_idempotencyKey", ["idempotencyKey"])
+    .index("by_status", ["status"]),
 
   auditEvents: defineTable({
     userId: v.optional(v.id("users")),
