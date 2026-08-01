@@ -71,14 +71,33 @@ function prMetaFromRaw(raw: Record<string, unknown>, pullRequestNumber: number, 
   };
 }
 
-async function dedupe(externalEventId: string, eventType: string): Promise<boolean> {
-  const result = (await db.mutation("webhookEvents:recordIfNew", {
+async function dedupe(
+  externalEventId: string,
+  eventType: string,
+): Promise<{ duplicate: boolean; id?: string }> {
+  return (await db.mutation("webhookEvents:recordIfNew", {
     provider: "github",
     externalEventId,
     eventType,
     verified: true,
-  })) as { duplicate: boolean };
-  return result.duplicate;
+  })) as { duplicate: boolean; id?: string };
+}
+
+/** Mark a webhook event finished so retries treat it as a true duplicate. */
+async function settle(eventId: string | undefined, error?: unknown): Promise<void> {
+  if (!eventId) return;
+  try {
+    if (error) {
+      await db.mutation("webhookEvents:markFailed", {
+        id: eventId,
+        errorSummary: String(error).slice(0, 300),
+      });
+    } else {
+      await db.mutation("webhookEvents:markProcessed", { id: eventId });
+    }
+  } catch (settleError) {
+    console.error("[github-channel] failed to settle webhook event", settleError);
+  }
 }
 
 /** Deliver a templated notification text to the user's Linq conversation. */
@@ -123,27 +142,47 @@ export default githubChannel({
   // Default @mention dispatch on comments, with actor-derived auth.
   onComment: (ctx) => ({ auth: defaultGitHubAuth(ctx) }),
 
-  onPullRequest: (ctx, pr) => {
+  // These hooks are AWAITED by eve (GitHubInboundResultOrPromise). Do the
+  // work inline and await it — a fire-and-forget promise here is killed when
+  // the serverless invocation ends, which silently dropped a real PR
+  // notification after the dedup row had already been written.
+  onPullRequest: async (ctx, pr) => {
     const repoFullName = ctx.repository.fullName;
-    const eligible = pr.action === "opened" || pr.action === "ready_for_review";
-    if (eligible) {
-      void handlePrEvent(repoFullName, ctx.delivery.id, pr.action, prMetaFromRaw(pr.raw, pr.pullRequestNumber, pr.headSha)).catch(
-        (error) => console.error("[github-channel] onPullRequest failed", error),
-      );
+    // "reopened" counts: closing and reopening is the natural way to
+    // re-trigger a notification, and a reopened PR is genuinely new work.
+    if (
+      pr.action === "opened" ||
+      pr.action === "ready_for_review" ||
+      pr.action === "reopened"
+    ) {
+      try {
+        await handlePrEvent(
+          repoFullName,
+          ctx.delivery.id,
+          pr.action,
+          prMetaFromRaw(pr.raw, pr.pullRequestNumber, pr.headSha),
+        );
+      } catch (error) {
+        console.error("[github-channel] onPullRequest failed", error);
+      }
     }
     // Never open a GitHub-comment session for PR lifecycle events.
     return null;
   },
 
-  onCheckSuite: (ctx, suite) => {
+  onCheckSuite: async (ctx, suite) => {
     if (suite.action === "completed" && suite.pullRequests.length > 0) {
-      void handleCheckSuite(
-        ctx.repository.fullName,
-        `check_suite:${suite.checkSuiteId}:${suite.conclusion ?? "unknown"}`,
-        suite.conclusion,
-        suite.headSha,
-        suite.pullRequests[0]!,
-      ).catch((error) => console.error("[github-channel] onCheckSuite failed", error));
+      try {
+        await handleCheckSuite(
+          ctx.repository.fullName,
+          `check_suite:${suite.checkSuiteId}:${suite.conclusion ?? "unknown"}`,
+          suite.conclusion,
+          suite.headSha,
+          suite.pullRequests[0]!,
+        );
+      } catch (error) {
+        console.error("[github-channel] onCheckSuite failed", error);
+      }
     }
     return null;
   },
@@ -155,7 +194,8 @@ async function handlePrEvent(
   action: string,
   pr: PrMeta,
 ): Promise<void> {
-  if (await dedupe(`pr:${repoFullName}:${pr.number}:${action}:${deliveryId}`, "pull_request")) return;
+  const event = await dedupe(`pr:${repoFullName}:${pr.number}:${action}:${deliveryId}`, "pull_request");
+  if (event.duplicate) return;
 
   const watchers = (await db.query("repositories:listWatchersByFullName", {
     fullName: repoFullName,
@@ -219,6 +259,8 @@ async function handlePrEvent(
       detail: `pull_request.${action}`,
     });
   }
+
+  await settle(event.id);
 }
 
 async function handleCheckSuite(
@@ -229,7 +271,8 @@ async function handleCheckSuite(
   prNumber: number,
 ): Promise<void> {
   if (conclusion !== "failure" && conclusion !== "success") return;
-  if (await dedupe(`${repoFullName}:${eventKey}`, "check_suite")) return;
+  const event = await dedupe(`${repoFullName}:${eventKey}`, "check_suite");
+  if (event.duplicate) return;
 
   const watchers = (await db.query("repositories:listWatchersByFullName", {
     fullName: repoFullName,
@@ -255,4 +298,6 @@ async function handleCheckSuite(
       `notify:ci:${repo.userId}:${repoFullName}:${prNumber}:${eventKey}`,
     );
   }
+
+  await settle(event.id);
 }

@@ -12,7 +12,11 @@ describe("convex/webhookEvents:recordIfNew", () => {
     t = convexTest(schema, modules);
   });
 
-  it("returns duplicate:false the first time and duplicate:true the second time", async () => {
+  it("suppresses a redelivery only after the first run reached processed", async () => {
+    // Regression guard: a real pull_request event was recorded, the invocation
+    // then died before texting the user, and the stale "received" row made
+    // every GitHub retry look like a duplicate — the notification was lost for
+    // good. Only a run that reached "processed" may suppress a redelivery.
     const first = await t.mutation(api.webhookEvents.recordIfNew, {
       provider: "github",
       externalEventId: "evt_1",
@@ -21,14 +25,25 @@ describe("convex/webhookEvents:recordIfNew", () => {
     });
     expect(first.duplicate).toBe(false);
 
-    const second = await t.mutation(api.webhookEvents.recordIfNew, {
+    const retryAfterCrash = await t.mutation(api.webhookEvents.recordIfNew, {
       provider: "github",
       externalEventId: "evt_1",
       eventType: "pull_request",
       verified: true,
     });
-    expect(second.duplicate).toBe(true);
-    expect(second.id).toEqual(first.id);
+    expect(retryAfterCrash.duplicate).toBe(false);
+    expect(retryAfterCrash.id).toEqual(first.id);
+
+    await t.mutation(api.webhookEvents.markProcessed, { id: first.id });
+
+    const afterSuccess = await t.mutation(api.webhookEvents.recordIfNew, {
+      provider: "github",
+      externalEventId: "evt_1",
+      eventType: "pull_request",
+      verified: true,
+    });
+    expect(afterSuccess.duplicate).toBe(true);
+    expect(afterSuccess.id).toEqual(first.id);
   });
 
   it("treats the same externalEventId from a different provider as not duplicate", async () => {

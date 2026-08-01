@@ -22,11 +22,18 @@ export const recordIfNew = mutation({
       .unique();
 
     if (existing) {
+      // Only a run that reached "processed" proves the work actually finished.
+      // An event still sitting at "received" means a previous attempt died
+      // mid-flight (serverless termination, crash), so let the provider's
+      // retry re-run it rather than swallowing the event forever. Re-running
+      // is safe: outbound sends are keyed by idempotencyKey in
+      // outboundMessages, so a replay cannot double-text anyone.
+      const settled = existing.processingState === "processed";
       await ctx.db.patch(existing._id, {
         attemptCount: existing.attemptCount + 1,
-        processingState: "duplicate",
+        processingState: settled ? "duplicate" : "received",
       });
-      return { duplicate: true as const, id: existing._id };
+      return { duplicate: settled, id: existing._id };
     }
 
     const id = await ctx.db.insert("webhookEvents", {
