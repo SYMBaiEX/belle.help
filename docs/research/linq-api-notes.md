@@ -399,6 +399,24 @@ explicitly.**
 `X-Webhook-Event`, `X-Webhook-Subscription-ID`, `X-Webhook-Timestamp`, `X-Webhook-Signature`
 (hex-encoded HMAC-SHA256, different encoding from the new headers — don't mix the two schemes).
 
+### ⚠️ Which scheme Belle actually uses (verified against the shipped adapter)
+
+Linq sends **both** header sets on every delivery. The `@linqapp/chat-sdk-adapter`
+package Belle uses verifies the **legacy** scheme, not Standard Webhooks. Verified
+by reading `node_modules/@linqapp/chat-sdk-adapter/dist/verification.js` and by
+live-testing the production endpoint (valid → 200, forged → 401, 1h-old → 401):
+
+- Headers: `x-webhook-timestamp`, `x-webhook-signature`
+- Signature encoding: **hex** (an optional `sha256=` prefix is accepted)
+- Signed content: `` `${timestamp}.${rawBody}` `` (timestamp, a literal dot, then the raw bytes)
+- HMAC key: the **raw secret string including the `whsec_` prefix**, UTF-8 encoded —
+  it is NOT base64-decoded and the prefix is NOT stripped
+- Freshness window: 300 seconds, compared as `abs(now - timestamp)`
+
+The Standard Webhooks description below is accurate for Linq's own documented
+scheme and for anyone verifying webhooks directly, but do not use it to test the
+adapter-backed endpoint — it will 401 with "Missing Linq webhook signature headers".
+
 ### Signature verification algorithm (Standard Webhooks spec)
 
 1. Extract `webhook-id`, `webhook-timestamp`, `webhook-signature` headers.

@@ -247,3 +247,19 @@ nuanced than a keyword scan Belle would reimplement).
   support message effects, text decorations, group management, contact cards, capability
   checks, or chat-health inspection, all of which Belle needs (chat-health/opt-out gating in
   particular is a hard compliance requirement, not optional polish).
+
+
+## Addendum (2026-08-01): verified signature scheme in production
+
+Implementation note discovered while wiring the live deployment. Linq emits both
+the Standard-Webhooks headers (`webhook-id` / `webhook-timestamp` /
+`webhook-signature`) and the legacy headers (`x-webhook-timestamp` /
+`x-webhook-signature`). The `@linqapp/chat-sdk-adapter` we depend on verifies the
+**legacy** pair: hex HMAC-SHA256 over `` `${timestamp}.${rawBody}` ``, keyed by the
+raw `whsec_…` secret string (not base64-decoded, prefix retained), with a
+300-second freshness window.
+
+Belle therefore does not implement its own verification — the adapter owns it, and
+`LINQ_WEBHOOK_SECRET` must be the full `whsec_…` value exactly as returned once at
+subscription-creation time. Verified against production `belle.help/eve/v1/linq`:
+valid signature → 200, forged signature → 401, one-hour-old timestamp → 401.

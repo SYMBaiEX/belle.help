@@ -7,6 +7,31 @@ merges only with your explicit, SHA-bound approval.
 
 Text Belle. Connect GitHub. Review, fix, and ship pull requests from anywhere.
 
+**Live:** [belle.help](https://belle.help) · text **+1 (213) 524-6010**
+
+Belle is **invite-only** during early access. Your first text puts you in the
+approval queue and sends a setup link — you can connect GitHub and pick
+repositories while you wait, so you're ready the moment you're approved. If you
+have an invite code, redeem it during setup and you're live immediately.
+
+## Access flow
+
+```
+first text ──▶ access request created ──▶ "you're on the list" + setup link
+                     │                              │
+                     │                    user completes onboarding
+                     │                    (GitHub, repos, autonomy)
+                     ▼                              │
+            admin approves at /admin ───▶ "You're approved! Chat away"
+                     │                              │
+                     └──────── or ──────────────────┘
+                        invite code redeemed → instant approval
+```
+
+Until approved, a number never reaches the model (reminders are throttled to
+once per 12h) and the agent's approval policy denies every external action, so
+an unapproved account cannot touch GitHub even through the dashboard.
+
 ## Architecture (one paragraph)
 
 One Vercel deployment hosts both the Next.js app (marketing, onboarding,
@@ -112,12 +137,35 @@ BYOK an OpenAI key in settings (encrypted, never redisplayed). ChatGPT/Codex
 subscription execution is **not** offered — OpenAI does not support it for
 third-party apps (see [ADR 003](docs/adr/003-openai-auth-and-inference.md)).
 
-### 5. Deploy
+### 5. Admin + invite codes
+Set `ADMIN_EMAIL` and `ADMIN_INITIAL_PASSWORD`, then seed the admin once:
+
+```bash
+npm run seed:admin
+```
+
+Or, on a serverless deploy, set `ADMIN_SEED_TOKEN` and call it once:
+
+```bash
+curl -X POST https://your-domain/api/admin/seed -H "x-seed-token: $ADMIN_SEED_TOKEN"
+```
+
+Sign in at `/admin`. The first sign-in forces a password change before anything
+else is usable. From there you can approve/deny access requests (approving texts
+the user automatically) and generate `BELLE-XXXX-XXXX` invite codes that
+auto-approve on redemption.
+
+### 6. Deploy
 ```bash
 vercel deploy --prod        # deploys Next.js + Eve + cron schedules together
 ```
-Attach `belle.help` in the Vercel dashboard (or `vercel domains add belle.help`).
+Attach the domain in the Vercel dashboard (or `vercel domains add <domain>`).
 Verify schedules under Settings → Cron Jobs, sessions under Agent Runs.
+
+CI runs typecheck + tests + build on every push (`.github/workflows/ci.yml`);
+Vercel's Git integration deploys `main` automatically. Add a `CONVEX_DEPLOY_KEY`
+repo secret (Convex dashboard → Settings → Deploy Keys → Production) to also
+deploy Convex functions from CI — the step skips cleanly without it.
 
 ## Safety model (the short version)
 
