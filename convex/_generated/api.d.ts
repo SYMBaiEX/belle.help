@@ -21,6 +21,7 @@ import type * as digests from "../digests.js";
 import type * as encryptedCredentials from "../encryptedCredentials.js";
 import type * as fixRuns from "../fixRuns.js";
 import type * as githubInstallations from "../githubInstallations.js";
+import type * as githubSync from "../githubSync.js";
 import type * as inviteCodes from "../inviteCodes.js";
 import type * as memories from "../memories.js";
 import type * as notificationPreferences from "../notificationPreferences.js";
@@ -61,6 +62,7 @@ declare const fullApi: ApiFromModules<{
   encryptedCredentials: typeof encryptedCredentials;
   fixRuns: typeof fixRuns;
   githubInstallations: typeof githubInstallations;
+  githubSync: typeof githubSync;
   inviteCodes: typeof inviteCodes;
   memories: typeof memories;
   notificationPreferences: typeof notificationPreferences;

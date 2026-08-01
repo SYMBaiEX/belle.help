@@ -6,14 +6,18 @@ export const metadata = { title: "Set up Belle" };
 export default async function OnboardingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ token?: string }>;
+  searchParams: Promise<{ token?: string; github?: string }>;
 }) {
-  const { token } = await searchParams;
+  const { token, github } = await searchParams;
   const session = await getSessionUser();
 
   return (
     <div className="min-h-screen" style={{ background: "var(--color-bg)" }}>
-      <OnboardingFlow token={token ?? null} signedIn={Boolean(session)} />
+      <OnboardingFlow
+        token={token ?? null}
+        signedIn={Boolean(session)}
+        githubConnected={github === "connected"}
+      />
     </div>
   );
 }

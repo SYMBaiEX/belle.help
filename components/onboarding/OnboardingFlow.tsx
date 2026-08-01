@@ -37,13 +37,16 @@ const githubInstallUrl = process.env.NEXT_PUBLIC_GITHUB_APP_INSTALL_URL;
 export function OnboardingFlow({
   token,
   signedIn,
+  githubConnected = false,
 }: {
   token: string | null;
   signedIn: boolean;
+  githubConnected?: boolean;
 }) {
   const [step, setStep] = useState<Step>(signedIn ? "ai" : "welcome");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const githubJustConnected = githubConnected;
 
   const [aiMode, setAiMode] = useState<"byok" | "managed" | null>(null);
   const [apiKey, setApiKey] = useState("");
@@ -69,6 +72,17 @@ export function OnboardingFlow({
       setErrorMessage("This link is missing or malformed. Text Belle again for a fresh link.");
     }
   }, [signedIn, token]);
+
+  // Landed here from GitHub's install callback (/api/github/callback ->
+  // /onboarding?github=connected) — skip straight to the repos step and
+  // load whatever the install just synced.
+  useEffect(() => {
+    if (signedIn && githubConnected) {
+      setStep("repos");
+      void loadRepos();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signedIn, githubConnected]);
 
   async function verify() {
     if (!token) return;
@@ -160,15 +174,9 @@ export function OnboardingFlow({
     setStep("github");
   }
 
-  async function confirmGithubInstalled() {
-    setBusy(true);
-    try {
-      await fetch("/api/onboarding/github-check", { method: "POST" });
-      await loadRepos();
-      setStep("repos");
-    } finally {
-      setBusy(false);
-    }
+  async function skipGithubForNow() {
+    await loadRepos();
+    setStep("repos");
   }
 
   async function loadRepos() {
@@ -183,22 +191,32 @@ export function OnboardingFlow({
     }
   }
 
+  async function syncRepos() {
+    setBusy(true);
+    try {
+      await fetch("/api/github/sync", { method: "POST" });
+      await loadRepos();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function toggleWatch(repo: RepoRow) {
     const next = !repo.watchEnabled;
     setRepos((prev) => prev.map((r) => (r._id === repo._id ? { ...r, watchEnabled: next } : r)));
-    await fetch(`/api/repositories/${repo._id}`, {
-      method: "PATCH",
+    await fetch("/api/github/repositories/watch", {
+      method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ watchEnabled: next }),
+      body: JSON.stringify({ fullName: repo.fullName, watchEnabled: next }),
     });
   }
 
   async function setAutonomy(repo: RepoRow, level: number) {
     setRepos((prev) => prev.map((r) => (r._id === repo._id ? { ...r, autonomyLevel: level } : r)));
-    await fetch(`/api/repositories/${repo._id}`, {
-      method: "PATCH",
+    await fetch("/api/github/repositories/watch", {
+      method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ autonomyLevel: level }),
+      body: JSON.stringify({ fullName: repo.fullName, watchEnabled: repo.watchEnabled, autonomyLevel: level }),
     });
   }
 
@@ -317,38 +335,70 @@ export function OnboardingFlow({
           </p>
           {githubInstallUrl ? (
             <a
-              href={githubInstallUrl}
-              target="_blank"
-              rel="noreferrer"
+              href="/api/github/install"
               className="mt-5 block rounded-full px-5 py-3 text-center text-sm font-semibold"
               style={{ background: "var(--color-accent)", color: "var(--color-accent-ink)" }}
             >
               Install the GitHub App
             </a>
           ) : (
-            <div
-              className="mt-5 rounded-xl border p-4 text-sm"
-              style={{ borderColor: "var(--color-border)", background: "var(--color-warning-soft)", color: "var(--color-ink)" }}
-            >
-              GitHub connector not configured yet — your operator needs to run{" "}
-              <code>vercel connect create github</code>.
-            </div>
+            <>
+              <div
+                className="mt-5 rounded-xl border p-4 text-sm"
+                style={{ borderColor: "var(--color-border)", background: "var(--color-warning-soft)", color: "var(--color-ink)" }}
+              >
+                GitHub connector not configured yet — your operator needs to run{" "}
+                <code>vercel connect create github --triggers</code>.
+              </div>
+              <button
+                type="button"
+                disabled
+                className="mt-5 block w-full rounded-full px-5 py-3 text-center text-sm font-semibold opacity-50"
+                style={{ background: "var(--color-accent)", color: "var(--color-accent-ink)" }}
+              >
+                Install the GitHub App
+              </button>
+            </>
           )}
-          <PrimaryButton onClick={confirmGithubInstalled} disabled={busy}>
-            {busy ? "Checking…" : "I've installed it"}
-          </PrimaryButton>
+          <button
+            type="button"
+            onClick={skipGithubForNow}
+            disabled={busy}
+            className="mt-4 w-full text-center text-xs underline disabled:opacity-50"
+            style={{ color: "var(--color-ink-faint)" }}
+          >
+            I&apos;ll do this later
+          </button>
         </Panel>
       ) : step === "repos" ? (
         <Panel>
-          <StepHeading title="Repositories & watch" />
+          {githubJustConnected ? (
+            <div
+              className="mb-4 rounded-xl border px-3.5 py-3 text-sm"
+              style={{ borderColor: "var(--color-border)", background: "var(--color-success-soft)", color: "var(--color-success)" }}
+            >
+              GitHub connected — pick your repositories below.
+            </div>
+          ) : null}
+          <div className="flex items-center justify-between gap-3">
+            <StepHeading title="Repositories & watch" />
+            <button
+              type="button"
+              onClick={syncRepos}
+              disabled={busy}
+              className="shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
+              style={{ background: "var(--color-surface)", color: "var(--color-ink-muted)" }}
+            >
+              {busy ? "Syncing…" : "Sync"}
+            </button>
+          </div>
           {!reposLoaded ? (
             <p className="mt-4 text-sm" style={{ color: "var(--color-ink-faint)" }}>
               Loading…
             </p>
           ) : repos.length === 0 ? (
             <p className="mt-4 text-sm leading-relaxed" style={{ color: "var(--color-ink-muted)" }}>
-              Repos appear here once the GitHub App install completes — you can also finish later
-              from the dashboard.
+              No repositories yet — connect GitHub above, or hit Sync.
             </p>
           ) : (
             <div className="mt-4 space-y-3">
