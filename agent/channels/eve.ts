@@ -1,15 +1,35 @@
 import { eveChannel } from "eve/channels/eve";
-import { localDev, placeholderAuth, vercelOidc } from "eve/channels/auth";
+import { localDev, vercelOidc, type AuthFn } from "eve/channels/auth";
+
+import { verifySessionCookie } from "../../lib/auth/session";
+
+/**
+ * Web/API channel auth for the embedded Eve routes (dashboard chat, session
+ * streaming). Order matters: Vercel OIDC (platform callers) → Belle session
+ * cookie (dashboard users) → localhost in dev. Everything else is 401.
+ */
+
+function belleSessionAuth(): AuthFn<Request> {
+  return async (request) => {
+    const cookieHeader = request.headers.get("cookie") ?? "";
+    const match = /(?:^|;\s*)belle_session=([^;]+)/.exec(cookieHeader);
+    if (!match?.[1]) return null;
+
+    const session = verifySessionCookie(decodeURIComponent(match[1]));
+    if (!session) return null;
+
+    return {
+      authenticator: "belle-web",
+      principalType: "user",
+      principalId: session.userId,
+      attributes: {
+        tenantId: session.userId,
+        surface: "dashboard",
+      },
+    };
+  };
+}
 
 export default eveChannel({
-  auth: [
-    // Lets the eve TUI and your Vercel deployments reach the deployed agent.
-    vercelOidc(),
-    // Open on localhost for `eve dev` and the REPL; ignored in production.
-    localDev(),
-    // This placeholder will not allow browser requests in production.
-    // Replace it with your app's auth provider, like Auth.js or Clerk,
-    // or use none() for a public demo.
-    placeholderAuth(),
-  ],
+  auth: [vercelOidc(), belleSessionAuth(), localDev()],
 });
