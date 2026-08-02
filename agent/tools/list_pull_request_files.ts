@@ -6,14 +6,16 @@ const PATCH_LIMIT = 4000;
 
 export default defineTool({
   description:
-    "List the files changed in a pull request, with per-file diff patches (truncated to keep output small). Paginated at 30 files per page.",
+    "List the files changed in a pull request, with per-file diff patches (truncated to keep output small). Paginated at 30 files per page. Returns { ok: false, message } when the request cannot be satisfied — relay the message rather than retrying blindly.",
   inputSchema: z.object({
     repositoryFullName: z.string().min(1).describe("owner/repo"),
     prNumber: z.number().int().positive(),
     page: z.number().int().positive().optional(),
   }),
   async execute({ repositoryFullName, prNumber, page }, ctx) {
-    const { octokit, repo } = await octokitForTenant(ctx, repositoryFullName);
+    const github = await octokitForTenant(ctx, repositoryFullName);
+    if (!github.ok) return github;
+    const { octokit, repo } = github;
 
     const { data: files } = await octokit.rest.pulls.listFiles({
       owner: repo.owner,
@@ -24,6 +26,7 @@ export default defineTool({
     });
 
     return {
+      ok: true as const,
       repositoryFullName,
       prNumber,
       page: page ?? 1,

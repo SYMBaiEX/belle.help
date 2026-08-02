@@ -1,7 +1,7 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { db } from "../lib/convex";
-import { requireTenantCaller } from "../lib/tenant";
+import { tenantCallerOrError } from "../lib/tenant";
 
 /**
  * Enqueues a deferred action and starts a durable Vercel Workflow run that
@@ -19,7 +19,8 @@ export default defineTool({
     'Schedule a deferred action for later: "remind me tomorrow", "watch this repo until Friday", ' +
     "or any other request that should happen at a specific future time rather than immediately. " +
     "For kind=\"reminder\" pass `text`. For kind=\"watch_expiry\" pass `repositoryFullName` — the " +
-    "repository's watch will be disabled at `runAfter` unless the user extends it first.",
+    "repository's watch will be disabled at `runAfter` unless the user extends it first. " +
+    "Returns { ok: false, message } when the request cannot be satisfied — relay the message rather than retrying blindly.",
   inputSchema: z.object({
     kind: z.enum(["watch_expiry", "reminder"]),
     runAfter: z.number().int().positive().describe("Epoch ms when the action should run"),
@@ -27,7 +28,9 @@ export default defineTool({
     text: z.string().min(1).optional().describe("Reminder text, required for reminder"),
   }),
   async execute({ kind, runAfter, repositoryFullName, text }, ctx) {
-    const caller = requireTenantCaller(ctx);
+    const tenant = tenantCallerOrError(ctx);
+    if (!tenant.ok) return tenant;
+    const { caller } = tenant;
 
     const actionId = (await db.mutation("scheduledActions:enqueue", {
       userId: caller.userId,
@@ -43,6 +46,7 @@ export default defineTool({
 
     if (!appUrl || !secret) {
       return {
+        ok: true as const,
         actionId,
         durable: false as const,
         note: "Durable scheduling is not configured — the 5-minute reconcile sweep will pick this up instead.",
@@ -67,14 +71,16 @@ export default defineTool({
       });
       if (!res.ok) {
         return {
+          ok: true as const,
           actionId,
           durable: false as const,
           note: "Durable scheduling request failed — the 5-minute reconcile sweep will pick this up instead.",
         };
       }
-      return { actionId, durable: true as const };
+      return { ok: true as const, actionId, durable: true as const };
     } catch {
       return {
+        ok: true as const,
         actionId,
         durable: false as const,
         note: "Durable scheduling request failed — the 5-minute reconcile sweep will pick this up instead.",

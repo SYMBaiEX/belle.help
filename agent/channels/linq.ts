@@ -64,6 +64,15 @@ export const { bot, channel, send } = chatSdkChannel({
   state: chatState(),
   // Texting surfaces deliver one message per turn; no post-then-edit streaming.
   streaming: false,
+  events: {
+    "session.failed"(_eventData, eventChannel) {
+      if (!eventChannel.thread) return;
+      return eventChannel.thread.post(
+        "Something went wrong on my end and I lost the thread of our conversation. " +
+          "Everything I've saved about your repos and preferences is intact — just tell me what you need.",
+      );
+    },
+  },
 });
 
 /**

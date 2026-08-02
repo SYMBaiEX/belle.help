@@ -111,7 +111,7 @@ export async function decideBelleApproval(ctx: ApprovalContext): Promise<Approva
 
 /**
  * Re-validate the Convex product approval inside a high-consequence tool's
- * execute. Throws with a user-explainable message when invalid.
+ * execute. Invalid approvals are expected and must stop the caller safely.
  */
 export async function consumeProductApproval(args: {
   approvalId: string;
@@ -120,11 +120,16 @@ export async function consumeProductApproval(args: {
   repositoryFullName: string;
   prNumber?: number;
   expectedHeadSha?: string;
-}): Promise<void> {
+}): Promise<{ ok: true } | { ok: false; reason: string; message: string }> {
   const result = (await db.mutation("approvals:consume", args)) as
     | { ok: true }
     | { ok: false; reason: string };
   if (!result.ok) {
-    throw new Error(`Approval invalid: ${result.reason}. Ask the user to re-approve.`);
+    return {
+      ok: false,
+      reason: result.reason.toLowerCase().replace(/\s+/g, "_"),
+      message: "That approval is no longer valid, so please approve the action again.",
+    };
   }
+  return { ok: true };
 }

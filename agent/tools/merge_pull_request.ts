@@ -3,11 +3,11 @@ import { z } from "zod";
 import { consumeProductApproval, decideBelleApproval } from "../lib/approval";
 import { db, recordAudit } from "../lib/convex";
 import { octokitForTenant } from "../lib/github";
-import { requireTenantCaller } from "../lib/tenant";
+import { tenantCallerOrError } from "../lib/tenant";
 
 export default defineTool({
   description:
-    "Merge a pull request. HIGH CONSEQUENCE and irreversible-ish: before calling this, create an approval request with create_approval_request, present the prompt to the user, wait for them to approve via resolve_approval, then call this tool with the approvalId. The head SHA is re-verified against `expectedHeadSha` at merge time — if the PR moved since approval, the merge is aborted.",
+    "Merge a pull request. HIGH CONSEQUENCE and irreversible-ish: before calling this, create an approval request with create_approval_request, present the prompt to the user, wait for them to approve via resolve_approval, then call this tool with the approvalId. The head SHA is re-verified against `expectedHeadSha` at merge time — if the PR moved since approval, the merge is aborted. Returns { ok: false, message } when the request cannot be satisfied — relay the message rather than retrying blindly.",
   inputSchema: z.object({
     repositoryFullName: z.string().min(1).describe("owner/repo"),
     prNumber: z.number().int().positive(),
@@ -17,9 +17,11 @@ export default defineTool({
   }),
   approval: decideBelleApproval,
   async execute({ repositoryFullName, prNumber, method, expectedHeadSha, approvalId }, ctx) {
-    const caller = requireTenantCaller(ctx);
+    const tenant = tenantCallerOrError(ctx);
+    if (!tenant.ok) return tenant;
+    const { caller } = tenant;
 
-    await consumeProductApproval({
+    const approval = await consumeProductApproval({
       approvalId,
       userId: caller.userId,
       action: "merge_pull_request",
@@ -27,8 +29,12 @@ export default defineTool({
       prNumber,
       expectedHeadSha,
     });
+    // Safety stop: invalid approval returns before any GitHub merge can be attempted.
+    if (!approval.ok) return approval;
 
-    const { octokit, repo } = await octokitForTenant(ctx, repositoryFullName);
+    const github = await octokitForTenant(ctx, repositoryFullName);
+    if (!github.ok) return github;
+    const { octokit, repo } = github;
 
     const { data: pr } = await octokit.rest.pulls.get({
       owner: repo.owner,
@@ -37,7 +43,12 @@ export default defineTool({
     });
 
     if (pr.head.sha !== expectedHeadSha) {
-      throw new Error("Head SHA changed since approval — merge aborted.");
+      // Safety stop: return immediately; never attempt a merge for a different head SHA.
+      return {
+        ok: false as const,
+        reason: "head_sha_changed",
+        message: "The pull request changed since approval, so I did not merge it.",
+      };
     }
 
     const { data: mergeResult } = await octokit.rest.pulls.merge({
@@ -49,7 +60,12 @@ export default defineTool({
     });
 
     if (!mergeResult.merged) {
-      throw new Error(mergeResult.message ?? "GitHub reported the merge did not succeed.");
+      // Safety stop: return immediately; never retry a merge GitHub reported as unsuccessful.
+      return {
+        ok: false as const,
+        reason: "merge_unsuccessful",
+        message: "GitHub reported that the merge did not succeed, so the pull request remains unmerged.",
+      };
     }
 
     const pullRequestDoc = (await db.query("pullRequests:getByRepoAndNumber", {
@@ -85,6 +101,6 @@ export default defineTool({
       refs: { approvalId },
     });
 
-    return { merged: true, sha: mergeResult.sha };
+    return { ok: true as const, merged: true, sha: mergeResult.sha };
   },
 });

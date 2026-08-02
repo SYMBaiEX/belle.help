@@ -5,13 +5,15 @@ import { octokitForTenant } from "../lib/github";
 
 export default defineTool({
   description:
-    "Composite merge-readiness report for a pull request: state/draft/mergeable status, combined CI checks, review approvals, branch protection required checks (when readable), Belle's latest blocking findings, and allowed merge methods.",
+    "Composite merge-readiness report for a pull request: state/draft/mergeable status, combined CI checks, review approvals, branch protection required checks (when readable), Belle's latest blocking findings, and allowed merge methods. Returns { ok: false, message } when the request cannot be satisfied — relay the message rather than retrying blindly.",
   inputSchema: z.object({
     repositoryFullName: z.string().min(1).describe("owner/repo"),
     prNumber: z.number().int().positive(),
   }),
   async execute({ repositoryFullName, prNumber }, ctx) {
-    const { octokit, repo } = await octokitForTenant(ctx, repositoryFullName);
+    const github = await octokitForTenant(ctx, repositoryFullName);
+    if (!github.ok) return github;
+    const { octokit, repo } = github;
 
     const { data: pr } = await octokit.rest.pulls.get({
       owner: repo.owner,
@@ -98,6 +100,7 @@ export default defineTool({
     if (repoInfo.data.allow_rebase_merge) allowedMergeMethods.push("rebase");
 
     return {
+      ok: true as const,
       repositoryFullName,
       prNumber,
       headSha: pr.head.sha,

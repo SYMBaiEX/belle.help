@@ -5,7 +5,7 @@ import { mintInstallationToken, tenantRepository } from "../../../../lib/github-
 
 export default defineTool({
   description:
-    "Clone repositoryFullName at branch into the sandbox for an approved fix, and verify the checked-out HEAD matches expectedHeadSha before any file is edited. Aborts if the remote has moved.",
+    "Clone repositoryFullName at branch into the sandbox for an approved fix, and verify the checked-out HEAD matches expectedHeadSha before any file is edited. Aborts if the remote has moved. Returns { ok: false, message } when the request cannot be satisfied — relay the message rather than retrying blindly.",
   inputSchema: z.object({
     repositoryFullName: z.string().min(1),
     branch: z.string().min(1),
@@ -13,8 +13,16 @@ export default defineTool({
   }),
   async execute({ repositoryFullName, branch, expectedHeadSha }, ctx) {
     // Verifies tenant ownership of the repo before minting any credential.
-    const repository = await tenantRepository(ctx, repositoryFullName);
-    const token = await mintInstallationToken(repository.installationId);
+    const repoResult = await tenantRepository(ctx, repositoryFullName);
+    // Safety behavior is unchanged: this returns before any clone/push occurs.
+    if (!repoResult.ok) return repoResult;
+    const { repository } = repoResult;
+    const minted = await mintInstallationToken(repository.installationId);
+    // Unwrap before use: this value is interpolated into a git URL, and a
+    // template literal would happily stringify the result object to
+    // "[object Object]" — a malformed credential that typecheck cannot catch.
+    if (!minted.ok) return minted;
+    const token = minted.token;
     const sandbox = await ctx.getSandbox();
 
     // Interim credential delivery: the installation token is interpolated
@@ -43,6 +51,6 @@ export default defineTool({
       command: `git -C repo config user.email "belle-agent[bot]@users.noreply.github.com"`,
     });
 
-    return { checkedOut: true, headSha };
+    return { ok: true as const, checkedOut: true, headSha };
   },
 });

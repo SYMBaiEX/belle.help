@@ -2,7 +2,7 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 
 import { db, recordAudit } from "../lib/convex";
-import { requireTenantCaller } from "../lib/tenant";
+import { tenantCallerOrError } from "../lib/tenant";
 
 /**
  * Durable memory for Belle.
@@ -14,7 +14,7 @@ import { requireTenantCaller } from "../lib/tenant";
  */
 export default defineTool({
   description:
-    "Remember a durable fact so it survives long after this conversation is compacted. Use it whenever the user states a preference, a convention, a correction, or a decision worth honoring later — their time zone, quiet hours, preferred merge method, how a repository builds and tests, sensitive areas to be careful with, review feedback they accepted or rejected, or who normally reviews what. Prefer one clear fact per call, with a short stable key you would search by later. Writing the same key again updates it rather than duplicating.",
+    "Remember a durable fact so it survives long after this conversation is compacted. Use it whenever the user states a preference, a convention, a correction, or a decision worth honoring later — their time zone, quiet hours, preferred merge method, how a repository builds and tests, sensitive areas to be careful with, review feedback they accepted or rejected, or who normally reviews what. Prefer one clear fact per call, with a short stable key you would search by later. Writing the same key again updates it rather than duplicating. Returns { ok: false, message } when the request cannot be satisfied — relay the message rather than retrying blindly.",
   inputSchema: z.object({
     scope: z
       .enum(["user", "repository", "conversation"])
@@ -33,11 +33,14 @@ export default defineTool({
       .describe("Required when scope is 'repository' — owner/repo."),
   }),
   async execute({ scope, key, value, repositoryFullName }, ctx) {
-    const caller = requireTenantCaller(ctx);
+    const tenant = tenantCallerOrError(ctx);
+    if (!tenant.ok) return tenant;
+    const { caller } = tenant;
 
     if (scope === "repository" && !repositoryFullName) {
       return {
-        stored: false as const,
+        ok: false as const,
+        reason: "repository_required",
         message: "A repositoryFullName is required when remembering something repository-scoped.",
       };
     }
@@ -58,6 +61,6 @@ export default defineTool({
       detail: `${scope}:${key}`,
     });
 
-    return { stored: true as const, scope, key };
+    return { ok: true as const, stored: true as const, scope, key };
   },
 });

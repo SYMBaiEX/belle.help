@@ -5,13 +5,17 @@ import { octokitForTenant } from "../../../../lib/github-tenant";
 
 export default defineTool({
   description:
-    "List jobs for a GitHub Actions workflow run, including which steps failed. Read-only.",
+    "List jobs for a GitHub Actions workflow run, including which steps failed. Read-only. Returns { ok: false, message } when the request cannot be satisfied — relay the message rather than retrying blindly.",
   inputSchema: z.object({
     repositoryFullName: z.string().min(1),
     runId: z.number().int().positive(),
   }),
   async execute({ repositoryFullName, runId }, ctx) {
-    const octokit = await octokitForTenant(ctx, repositoryFullName);
+    const github = await octokitForTenant(ctx, repositoryFullName);
+    // Expected failure returns a value: eve's session.failed is terminal, so a
+    // throw here would destroy the user's whole conversation.
+    if (!github.ok) return github;
+    const { octokit } = github;
     const [owner, repo] = repositoryFullName.split("/");
 
     const { data } = await octokit.request(

@@ -2,7 +2,7 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { db } from "../lib/convex";
 import { octokitForTenant } from "../lib/github";
-import { requireTenantCaller } from "../lib/tenant";
+import { tenantCallerOrError } from "../lib/tenant";
 
 function truncate(text: string | null | undefined, max: number): string | undefined {
   if (!text) return undefined;
@@ -11,14 +11,18 @@ function truncate(text: string | null | undefined, max: number): string | undefi
 
 export default defineTool({
   description:
-    "Fetch a pull request's details from GitHub (title, body, state, diffstat, mergeability, labels, author). Also records it in Convex and sets it as the active PR for this conversation.",
+    "Fetch a pull request's details from GitHub (title, body, state, diffstat, mergeability, labels, author). Also records it in Convex and sets it as the active PR for this conversation. Returns { ok: false, message } when the request cannot be satisfied — relay the message rather than retrying blindly.",
   inputSchema: z.object({
     repositoryFullName: z.string().min(1).describe("owner/repo"),
     prNumber: z.number().int().positive(),
   }),
   async execute({ repositoryFullName, prNumber }, ctx) {
-    const caller = requireTenantCaller(ctx);
-    const { octokit, repo } = await octokitForTenant(ctx, repositoryFullName);
+    const tenant = tenantCallerOrError(ctx);
+    if (!tenant.ok) return tenant;
+    const { caller } = tenant;
+    const github = await octokitForTenant(ctx, repositoryFullName);
+    if (!github.ok) return github;
+    const { octokit, repo } = github;
 
     const { data: pr } = await octokit.rest.pulls.get({
       owner: repo.owner,
@@ -50,6 +54,7 @@ export default defineTool({
     });
 
     return {
+      ok: true as const,
       repositoryFullName,
       prNumber: pr.number,
       title: pr.title,

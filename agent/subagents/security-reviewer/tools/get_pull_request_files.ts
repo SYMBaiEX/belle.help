@@ -8,13 +8,17 @@ const MAX_PAGES = 10; // hard cap: 1000 files
 
 export default defineTool({
   description:
-    "List the files changed in a pull request, with per-file diff patches (truncated). Read-only.",
+    "List the files changed in a pull request, with per-file diff patches (truncated). Read-only. Returns { ok: false, message } when the request cannot be satisfied — relay the message rather than retrying blindly.",
   inputSchema: z.object({
     repositoryFullName: z.string().min(1),
     prNumber: z.number().int().positive(),
   }),
   async execute({ repositoryFullName, prNumber }, ctx) {
-    const octokit = await octokitForTenant(ctx, repositoryFullName);
+    const github = await octokitForTenant(ctx, repositoryFullName);
+    // Expected failure returns a value: eve's session.failed is terminal, so a
+    // throw here would destroy the user's whole conversation.
+    if (!github.ok) return github;
+    const { octokit } = github;
     const [owner, repo] = repositoryFullName.split("/");
 
     const files: Array<{

@@ -1,14 +1,16 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { db } from "../lib/convex";
-import { requireTenantCaller } from "../lib/tenant";
+import { tenantCallerOrError } from "../lib/tenant";
 
 export default defineTool({
   description:
-    "Get the current Belle user's profile, active conversation context (repo/PR/head SHA/pending approval), any pending approvals, and a summary of watched repositories. Call this at the start of a conversation or whenever you need to reorient.",
+    "Get the current Belle user's profile, active conversation context (repo/PR/head SHA/pending approval), any pending approvals, and a summary of watched repositories. Call this at the start of a conversation or whenever you need to reorient. Returns { ok: false, message } when the request cannot be satisfied — relay the message rather than retrying blindly.",
   inputSchema: z.object({}),
   async execute(_input, ctx) {
-    const caller = requireTenantCaller(ctx);
+    const tenant = tenantCallerOrError(ctx);
+    if (!tenant.ok) return tenant;
+    const { caller } = tenant;
 
     const [user, conversationContext, pendingApprovals, repositories, userMemories] =
       await Promise.all([
@@ -54,6 +56,7 @@ export default defineTool({
     const memories = (userMemories as Array<{ key: string; value: string }>) ?? [];
 
     return {
+      ok: true as const,
       user: {
         name: u?.name,
         timeZone: u?.timeZone,

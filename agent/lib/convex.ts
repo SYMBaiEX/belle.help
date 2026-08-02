@@ -25,13 +25,25 @@ export function convex(): ConvexHttpClient {
 
 /** Typed-ish facade over the Convex functions the agent uses. */
 export const db = {
-  query: (name: string, args: Record<string, unknown>) => {
+  query: async (name: string, args: Record<string, unknown>) => {
     const [mod, fn] = name.split(":");
-    return convex().query(anyApi[mod!]![fn!]!, args);
+    const convexClient = convex();
+    try {
+      return await convexClient.query(anyApi[mod!]![fn!]!, args);
+    } catch {
+      // Never copy Convex error text here: it can contain serialized argument values.
+      throw new Error("Convex query failed.");
+    }
   },
-  mutation: (name: string, args: Record<string, unknown>) => {
+  mutation: async (name: string, args: Record<string, unknown>) => {
     const [mod, fn] = name.split(":");
-    return convex().mutation(anyApi[mod!]![fn!]!, args);
+    const convexClient = convex();
+    try {
+      return await convexClient.mutation(anyApi[mod!]![fn!]!, args);
+    } catch {
+      // Never copy Convex error text here: it can contain serialized argument values.
+      throw new Error("Convex mutation failed.");
+    }
   },
 };
 

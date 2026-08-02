@@ -3,11 +3,11 @@ import { z } from "zod";
 import { consumeProductApproval, decideBelleApproval } from "../lib/approval";
 import { db, recordAudit } from "../lib/convex";
 import { octokitForTenant } from "../lib/github";
-import { requireTenantCaller } from "../lib/tenant";
+import { tenantCallerOrError } from "../lib/tenant";
 
 export default defineTool({
   description:
-    "Close a pull request without merging. HIGH CONSEQUENCE: before calling this, create an approval request with create_approval_request, present the prompt to the user, wait for them to approve via resolve_approval, then call this tool with the approvalId.",
+    "Close a pull request without merging. HIGH CONSEQUENCE: before calling this, create an approval request with create_approval_request, present the prompt to the user, wait for them to approve via resolve_approval, then call this tool with the approvalId. Returns { ok: false, message } when the request cannot be satisfied — relay the message rather than retrying blindly.",
   inputSchema: z.object({
     repositoryFullName: z.string().min(1).describe("owner/repo"),
     prNumber: z.number().int().positive(),
@@ -15,17 +15,23 @@ export default defineTool({
   }),
   approval: decideBelleApproval,
   async execute({ repositoryFullName, prNumber, approvalId }, ctx) {
-    const caller = requireTenantCaller(ctx);
+    const tenant = tenantCallerOrError(ctx);
+    if (!tenant.ok) return tenant;
+    const { caller } = tenant;
 
-    await consumeProductApproval({
+    const approval = await consumeProductApproval({
       approvalId,
       userId: caller.userId,
       action: "close_pull_request",
       repositoryFullName,
       prNumber,
     });
+    // Safety stop: invalid approval must return before the pull request is closed.
+    if (!approval.ok) return approval;
 
-    const { octokit, repo } = await octokitForTenant(ctx, repositoryFullName);
+    const github = await octokitForTenant(ctx, repositoryFullName);
+    if (!github.ok) return github;
+    const { octokit, repo } = github;
 
     const { data: pr } = await octokit.rest.pulls.update({
       owner: repo.owner,
@@ -66,6 +72,6 @@ export default defineTool({
       refs: { approvalId },
     });
 
-    return { closed: true };
+    return { ok: true as const, closed: true };
   },
 });

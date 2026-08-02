@@ -1,17 +1,19 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { db, recordAudit } from "../lib/convex";
-import { requireTenantCaller } from "../lib/tenant";
+import { tenantCallerOrError } from "../lib/tenant";
 
 export default defineTool({
   description:
-    "Pause Belle's watch on a repository (or all of the user's repositories if none given). When `until` is given, sets a snooze timestamp on notification preferences instead of disabling the watch outright.",
+    "Pause Belle's watch on a repository (or all of the user's repositories if none given). When `until` is given, sets a snooze timestamp on notification preferences instead of disabling the watch outright. Returns { ok: false, message } when the request cannot be satisfied — relay the message rather than retrying blindly.",
   inputSchema: z.object({
     repositoryFullName: z.string().optional().describe("owner/repo; omit to pause all watched repos"),
     until: z.number().optional().describe("Unix ms timestamp to snooze until"),
   }),
   async execute({ repositoryFullName, until }, ctx) {
-    const caller = requireTenantCaller(ctx);
+    const tenant = tenantCallerOrError(ctx);
+    if (!tenant.ok) return tenant;
+    const { caller } = tenant;
 
     if (until !== undefined) {
       const existing = (await db.query("notificationPreferences:getByUser", {
@@ -44,7 +46,7 @@ export default defineTool({
         detail: `snoozed until ${new Date(until).toISOString()}`,
       });
 
-      return { paused: "snoozed" as const, until, repositoryFullName };
+      return { ok: true as const, paused: "snoozed" as const, until, repositoryFullName };
     }
 
     if (repositoryFullName) {
@@ -53,7 +55,11 @@ export default defineTool({
         fullName: repositoryFullName,
       })) as { _id: string } | null;
       if (!repo) {
-        throw new Error(`Repository ${repositoryFullName} is not configured for this user.`);
+        return {
+          ok: false as const,
+          reason: "repository_not_configured",
+          message: `Repository ${repositoryFullName} is not configured for this user.`,
+        };
       }
       await db.mutation("repositories:setWatch", { repositoryId: repo._id, watchEnabled: false });
 
@@ -65,7 +71,7 @@ export default defineTool({
         detail: "watchEnabled=false",
       });
 
-      return { paused: "single" as const, repositoryFullName };
+      return { ok: true as const, paused: "single" as const, repositoryFullName };
     }
 
     const repos = (await db.query("repositories:listByUser", {
@@ -86,6 +92,6 @@ export default defineTool({
       detail: `paused all: ${paused.join(", ") || "(none were watched)"}`,
     });
 
-    return { paused: "all" as const, repositoryFullNames: paused };
+    return { ok: true as const, paused: "all" as const, repositoryFullNames: paused };
   },
 });

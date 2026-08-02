@@ -1,11 +1,11 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { db, recordAudit } from "../lib/convex";
-import { requireTenantCaller } from "../lib/tenant";
+import { tenantCallerOrError } from "../lib/tenant";
 
 export default defineTool({
   description:
-    "Configure Belle's watch rule and policy for a repository: watch on/off and expiry, autonomy level (0-4), auto/security review, draft and CI-failure notifications, review publishing policy, author/branch/label filters, and digest inclusion. Only the fields you pass are changed.",
+    "Configure Belle's watch rule and policy for a repository: watch on/off and expiry, autonomy level (0-4), auto/security review, draft and CI-failure notifications, review publishing policy, author/branch/label filters, and digest inclusion. Only the fields you pass are changed. Returns { ok: false, message } when the request cannot be satisfied — relay the message rather than retrying blindly.",
   inputSchema: z.object({
     repositoryFullName: z.string().min(1).describe("owner/repo"),
     watchEnabled: z.boolean().optional(),
@@ -28,14 +28,20 @@ export default defineTool({
     weeklyDigest: z.boolean().optional(),
   }),
   async execute({ repositoryFullName, ...changes }, ctx) {
-    const caller = requireTenantCaller(ctx);
+    const tenant = tenantCallerOrError(ctx);
+    if (!tenant.ok) return tenant;
+    const { caller } = tenant;
 
     const repo = (await db.query("repositories:getByUserAndFullName", {
       userId: caller.userId,
       fullName: repositoryFullName,
     })) as { _id: string } | null;
     if (!repo) {
-      throw new Error(`Repository ${repositoryFullName} is not configured for this user.`);
+      return {
+        ok: false as const,
+        reason: "repository_not_configured",
+        message: `Repository ${repositoryFullName} is not configured for this user.`,
+      };
     }
 
     const patch = Object.fromEntries(
@@ -55,6 +61,6 @@ export default defineTool({
         .join(" "),
     });
 
-    return { repositoryFullName, applied: patch };
+    return { ok: true as const, repositoryFullName, applied: patch };
   },
 });

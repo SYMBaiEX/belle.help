@@ -26,8 +26,13 @@ const MAX_PAGES = 10;
 export async function listInstallationRepositories(
   installationId: number,
 ): Promise<InstallationRepository[]> {
-  const token = await mintInstallationToken(installationId);
-  const octokit = createOctokit(token);
+  // This module is a library consumed by app/api routes and app/workflows, and
+  // its exported signature must not change. The shared helper now returns a
+  // discriminated result, so unwrap it here and surface a plain Error — the
+  // route/workflow layer above already handles thrown failures.
+  const minted = await mintInstallationToken(installationId);
+  if (!minted.ok) throw new Error(minted.message);
+  const octokit = createOctokit(minted.token);
 
   const repos: InstallationRepository[] = [];
   for (let page = 1; page <= MAX_PAGES; page += 1) {

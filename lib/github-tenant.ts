@@ -33,9 +33,14 @@ function convex(): ConvexHttpClient {
 }
 
 const db = {
-  query: (name: string, args: Record<string, unknown>) => {
+  query: async (name: string, args: Record<string, unknown>) => {
     const [mod, fn] = name.split(":");
-    return convex().query(anyApi[mod!]![fn!]!, args);
+    const convexClient = convex();
+    try {
+      return await convexClient.query(anyApi[mod!]![fn!]!, args);
+    } catch {
+      throw new Error("Convex query failed.");
+    }
   },
 };
 
@@ -45,16 +50,29 @@ const db = {
  * Falls back to `process.env.GITHUB_TOKEN` when Connect itself throws (for
  * example, the connector isn't configured in this environment yet).
  */
-export async function mintInstallationToken(installationId: number): Promise<string> {
+export interface GithubTenantFailure {
+  ok: false;
+  reason: string;
+  message: string;
+}
+
+export async function mintInstallationToken(
+  installationId: number,
+): Promise<{ ok: true; token: string } | GithubTenantFailure> {
   try {
-    return await getToken(process.env.VERCEL_CONNECT_GITHUB_UID ?? "github/belle", {
+    const token = await getToken(process.env.VERCEL_CONNECT_GITHUB_UID ?? "github/belle", {
       subject: { type: "app" },
       installationId: String(installationId),
     });
-  } catch (error) {
+    return { ok: true, token };
+  } catch {
     const fallback = process.env.GITHUB_TOKEN;
-    if (fallback) return fallback;
-    throw error;
+    if (fallback) return { ok: true, token: fallback };
+    return {
+      ok: false,
+      reason: "github_token_unavailable",
+      message: "GitHub access is temporarily unavailable, so I could not complete that request.",
+    };
   }
 }
 
@@ -73,13 +91,19 @@ type AuthLike = {
  * `ctx.session`. Mirrors `agent/lib/tenant.ts`'s `requireTenantCaller`
  * without importing it, per the isolation goal above.
  */
-function requireTenantUserId(ctx: Pick<SessionContext, "session">): string {
+function tenantUserIdOrError(
+  ctx: Pick<SessionContext, "session">,
+): { ok: true; userId: string } | GithubTenantFailure {
   const current = (ctx.session as unknown as AuthLike).auth.current;
   const tenantId = current?.attributes.tenantId;
   if (current?.principalType !== "user" || typeof tenantId !== "string") {
-    throw new Error("An authenticated Belle user is required for this action.");
+    return {
+      ok: false,
+      reason: "missing_principal",
+      message: "I can’t do that because this conversation is not connected to an authenticated Belle user.",
+    };
   }
-  return tenantId;
+  return { ok: true, userId: tenantId };
 }
 
 export interface TenantRepository {
@@ -89,34 +113,59 @@ export interface TenantRepository {
   fullName: string;
 }
 
+interface GithubInstallationDoc {
+  userId: string;
+  installationId: number;
+  status: "active" | "revoked";
+}
+
 /**
  * Verify the current tenant owns `repositoryFullName` (via
- * `repositories:getByUserAndFullName`) and return its stored record. Throws
- * when the caller is unauthenticated or the repository is not in that
- * user's configured selection — callers must never fall back to trusting a
+ * `repositories:getByUserAndFullName`) and return its stored record. Returns
+ * an expected failure when caller or installation access is unavailable.
+ * Callers must never fall back to trusting a
  * model-supplied repository name without this check.
  */
 export async function tenantRepository(
   ctx: Pick<SessionContext, "session">,
   repositoryFullName: string,
-): Promise<TenantRepository> {
-  const userId = requireTenantUserId(ctx);
+): Promise<{ ok: true; repository: TenantRepository } | GithubTenantFailure> {
+  const tenant = tenantUserIdOrError(ctx);
+  if (!tenant.ok) return tenant;
+  const { userId } = tenant;
   const repository = (await db.query("repositories:getByUserAndFullName", {
     userId,
     fullName: repositoryFullName,
   })) as { installationId: number; owner: string; name: string; fullName: string } | null;
 
   if (!repository) {
-    throw new Error(
-      `Repository "${repositoryFullName}" is not in this user's configured selection.`,
-    );
+    return {
+      ok: false,
+      reason: "repository_not_configured",
+      message: `Repository ${repositoryFullName} is not configured for this user.`,
+    };
+  }
+
+  const installation = (await db.query("githubInstallations:getByInstallationId", {
+    installationId: repository.installationId,
+  })) as GithubInstallationDoc | null;
+
+  if (!installation || installation.status !== "active" || installation.userId !== userId) {
+    return {
+      ok: false,
+      reason: "github_installation_unavailable",
+      message: `The GitHub connection for ${repositoryFullName} is missing or has been revoked.`,
+    };
   }
 
   return {
-    installationId: repository.installationId,
-    owner: repository.owner,
-    name: repository.name,
-    fullName: repository.fullName,
+    ok: true,
+    repository: {
+      installationId: repository.installationId,
+      owner: repository.owner,
+      name: repository.name,
+      fullName: repository.fullName,
+    },
   };
 }
 
@@ -127,8 +176,10 @@ export async function tenantRepository(
 export async function octokitForTenant(
   ctx: Pick<SessionContext, "session">,
   repositoryFullName: string,
-): Promise<Octokit> {
-  const repository = await tenantRepository(ctx, repositoryFullName);
-  const token = await mintInstallationToken(repository.installationId);
-  return createOctokit(token);
+): Promise<{ ok: true; octokit: Octokit } | GithubTenantFailure> {
+  const repositoryResult = await tenantRepository(ctx, repositoryFullName);
+  if (!repositoryResult.ok) return repositoryResult;
+  const tokenResult = await mintInstallationToken(repositoryResult.repository.installationId);
+  if (!tokenResult.ok) return tokenResult;
+  return { ok: true, octokit: createOctokit(tokenResult.token) };
 }

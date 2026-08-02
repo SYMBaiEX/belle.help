@@ -4,7 +4,7 @@ import { z } from "zod";
 import { createInstallState } from "../../lib/github/state";
 import { createShortLink } from "../../lib/short-links";
 import { recordAudit } from "../lib/convex";
-import { requireTenantCaller } from "../lib/tenant";
+import { tenantCallerOrError } from "../lib/tenant";
 
 /**
  * Mints a one-tap GitHub App install link for the current user.
@@ -19,17 +19,20 @@ import { requireTenantCaller } from "../lib/tenant";
  */
 export default defineTool({
   description:
-    "Create a ready-to-approve GitHub connection link for the current user. Use this whenever the user needs to connect GitHub, asks about their repositories but has none connected, or wants to add more repositories. Send the returned URL to them directly — it opens GitHub's install screen where they pick repositories and approve. The link is personal and expires, so mint a fresh one each time rather than reusing an old one.",
+    "Create a ready-to-approve GitHub connection link for the current user. Use this whenever the user needs to connect GitHub, asks about their repositories but has none connected, or wants to add more repositories. Send the returned URL to them directly — it opens GitHub's install screen where they pick repositories and approve. The link is personal and expires, so mint a fresh one each time rather than reusing an old one. Returns { ok: false, message } when the request cannot be satisfied — relay the message rather than retrying blindly.",
   inputSchema: z.object({}),
   async execute(_input, ctx) {
-    const caller = requireTenantCaller(ctx);
+    const tenant = tenantCallerOrError(ctx);
+    if (!tenant.ok) return tenant;
+    const { caller } = tenant;
 
     const base = process.env.NEXT_PUBLIC_GITHUB_APP_INSTALL_URL;
     if (!base) {
       return {
-        available: false as const,
+        ok: false as const,
+        reason: "github_connect_unavailable",
         message:
-          "GitHub connection is not configured on this deployment yet. Tell the user their operator still needs to finish GitHub setup — do not invent a link.",
+          "GitHub connection is not configured on this deployment yet, so an operator needs to finish GitHub setup.",
       };
     }
 
@@ -55,6 +58,7 @@ export default defineTool({
     });
 
     return {
+      ok: true as const,
       available: true as const,
       url,
       expiresInMinutes: ttlMinutes,

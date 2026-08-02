@@ -1,14 +1,14 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { db } from "../lib/convex";
-import { requireTenantCaller } from "../lib/tenant";
+import { tenantCallerOrError } from "../lib/tenant";
 
 const MAX_TTL_MINUTES = 1440;
 const DEFAULT_TTL_MINUTES = 60;
 
 export default defineTool({
   description:
-    "Create a Convex approval record BEFORE calling any high-consequence tool (merge_pull_request, close_pull_request). Present `prompt` to the user in the conversation, wait for their answer, then call resolve_approval, and if approved pass the returned approvalId into the gated tool. Never call a high-consequence tool without first creating and resolving an approval this way.",
+    "Create a Convex approval record BEFORE calling any high-consequence tool (merge_pull_request, close_pull_request). Present `prompt` to the user in the conversation, wait for their answer, then call resolve_approval, and if approved pass the returned approvalId into the gated tool. Never call a high-consequence tool without first creating and resolving an approval this way. Returns { ok: false, message } when the request cannot be satisfied — relay the message rather than retrying blindly.",
   inputSchema: z.object({
     action: z.string().min(1).describe('e.g. "merge_pull_request"'),
     repositoryFullName: z.string().min(1).describe("owner/repo"),
@@ -23,7 +23,9 @@ export default defineTool({
     { action, repositoryFullName, prNumber, headSha, findingIds, prompt, params, expiresInMinutes },
     ctx,
   ) {
-    const caller = requireTenantCaller(ctx);
+    const tenant = tenantCallerOrError(ctx);
+    if (!tenant.ok) return tenant;
+    const { caller } = tenant;
     const ttlMs = (expiresInMinutes ?? DEFAULT_TTL_MINUTES) * 60 * 1000;
 
     const approvalId = (await db.mutation("approvals:createRequest", {
@@ -49,6 +51,6 @@ export default defineTool({
       });
     }
 
-    return { approvalId, expiresAt };
+    return { ok: true as const, approvalId, expiresAt };
   },
 });

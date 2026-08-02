@@ -4,7 +4,7 @@ import { octokitForTenant } from "../lib/github";
 
 export default defineTool({
   description:
-    "Get a compact failure summary for a CI run: failing job/step names for a workflow run, or annotations for a specific check run. Does not download full logs.",
+    "Get a compact failure summary for a CI run: failing job/step names for a workflow run, or annotations for a specific check run. Does not download full logs. Returns { ok: false, message } when the request cannot be satisfied — relay the message rather than retrying blindly.",
   inputSchema: z
     .object({
       repositoryFullName: z.string().min(1).describe("owner/repo"),
@@ -15,7 +15,9 @@ export default defineTool({
       message: "Provide workflowRunId or checkRunId.",
     }),
   async execute({ repositoryFullName, workflowRunId, checkRunId }, ctx) {
-    const { octokit, repo } = await octokitForTenant(ctx, repositoryFullName);
+    const github = await octokitForTenant(ctx, repositoryFullName);
+    if (!github.ok) return github;
+    const { octokit, repo } = github;
 
     const result: {
       repositoryFullName: string;
@@ -74,6 +76,6 @@ export default defineTool({
       });
     }
 
-    return result;
+    return { ok: true as const, ...result };
   },
 });

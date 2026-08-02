@@ -3,11 +3,11 @@ import { z } from "zod";
 import { decideBelleApproval } from "../lib/approval";
 import { recordAudit } from "../lib/convex";
 import { octokitForTenant } from "../lib/github";
-import { requireTenantCaller } from "../lib/tenant";
+import { tenantCallerOrError } from "../lib/tenant";
 
 export default defineTool({
   description:
-    "Add a comment to a pull request. Pass `path` and `line` to leave an inline code comment on the current head commit; omit them to post a general issue-style comment.",
+    "Add a comment to a pull request. Pass `path` and `line` to leave an inline code comment on the current head commit; omit them to post a general issue-style comment. Returns { ok: false, message } when the request cannot be satisfied — relay the message rather than retrying blindly.",
   inputSchema: z.object({
     repositoryFullName: z.string().min(1).describe("owner/repo"),
     prNumber: z.number().int().positive(),
@@ -18,8 +18,12 @@ export default defineTool({
   }),
   approval: decideBelleApproval,
   async execute({ repositoryFullName, prNumber, body, path, line, side }, ctx) {
-    const caller = requireTenantCaller(ctx);
-    const { octokit, repo } = await octokitForTenant(ctx, repositoryFullName);
+    const tenant = tenantCallerOrError(ctx);
+    if (!tenant.ok) return tenant;
+    const { caller } = tenant;
+    const github = await octokitForTenant(ctx, repositoryFullName);
+    if (!github.ok) return github;
+    const { octokit, repo } = github;
 
     let commentUrl: string;
     let commentId: number;
@@ -63,6 +67,6 @@ export default defineTool({
       refs: { commentId, commentUrl },
     });
 
-    return { commentId, commentUrl };
+    return { ok: true as const, commentId, commentUrl };
   },
 });

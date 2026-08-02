@@ -1,7 +1,7 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { db } from "../lib/convex";
-import { requireTenantCaller } from "../lib/tenant";
+import { tenantCallerOrError } from "../lib/tenant";
 
 const validationSchema = z.object({
   typecheck: z.enum(["passed", "failed", "skipped"]).optional(),
@@ -11,7 +11,7 @@ const validationSchema = z.object({
 
 export default defineTool({
   description:
-    "Record or update a fix-run: an automated code-fix attempt Belle made on a pull request. Pass fixRunId to update an existing run (e.g. after validation completes), or omit it to start a new one.",
+    "Record or update a fix-run: an automated code-fix attempt Belle made on a pull request. Pass fixRunId to update an existing run (e.g. after validation completes), or omit it to start a new one. Returns { ok: false, message } when the request cannot be satisfied — relay the message rather than retrying blindly.",
   inputSchema: z.object({
     fixRunId: z.string().optional(),
     repositoryFullName: z.string().min(1).describe("owner/repo"),
@@ -41,7 +41,9 @@ export default defineTool({
     },
     ctx,
   ) {
-    const caller = requireTenantCaller(ctx);
+    const tenant = tenantCallerOrError(ctx);
+    if (!tenant.ok) return tenant;
+    const { caller } = tenant;
 
     let id = fixRunId;
 
@@ -51,7 +53,11 @@ export default defineTool({
         fullName: repositoryFullName,
       })) as { _id: string } | null;
       if (!repo) {
-        throw new Error(`Repository ${repositoryFullName} is not configured for this user.`);
+        return {
+          ok: false as const,
+          reason: "repository_not_configured",
+          message: `Repository ${repositoryFullName} is not configured for this user.`,
+        };
       }
 
       const pullRequestDoc = (await db.query("pullRequests:getByRepoAndNumber", {
@@ -59,9 +65,11 @@ export default defineTool({
         number: prNumber,
       })) as { _id: string } | null;
       if (!pullRequestDoc) {
-        throw new Error(
-          `Pull request ${repositoryFullName}#${prNumber} is not recorded yet — call get_pull_request first.`,
-        );
+        return {
+          ok: false as const,
+          reason: "pull_request_not_recorded",
+          message: `Pull request ${repositoryFullName}#${prNumber} is not recorded yet, so I need to fetch it first.`,
+        };
       }
 
       id = (await db.mutation("fixRuns:create", {
@@ -82,6 +90,6 @@ export default defineTool({
       error,
     });
 
-    return { fixRunId: id };
+    return { ok: true as const, fixRunId: id };
   },
 });

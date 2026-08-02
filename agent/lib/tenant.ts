@@ -17,6 +17,14 @@ export interface TenantCaller {
   protocol?: string;
 }
 
+export interface ToolFailure {
+  ok: false;
+  reason: string;
+  message: string;
+}
+
+export type TenantCallerResult = { ok: true; caller: TenantCaller } | ToolFailure;
+
 type AuthLike = {
   auth: {
     current: {
@@ -50,6 +58,21 @@ export function requireTenantCaller(ctx: Pick<SessionContext, "session">): Tenan
   const caller = callerFrom((ctx.session as unknown as AuthLike).auth.current);
   if (!caller) throw new Error("An authenticated Belle user is required for this action.");
   return caller;
+}
+
+/** Tool-safe tenant lookup: missing auth is user-explainable, not a session failure. */
+export function tenantCallerOrError(
+  ctx: Pick<SessionContext, "session">,
+): TenantCallerResult {
+  const caller = callerFrom((ctx.session as unknown as AuthLike).auth.current);
+  if (!caller) {
+    return {
+      ok: false,
+      reason: "missing_principal",
+      message: "I can’t do that because this conversation is not connected to an authenticated Belle user.",
+    };
+  }
+  return { ok: true, caller };
 }
 
 /** Lenient: returns null for app/runtime principals (schedules, webhooks). */

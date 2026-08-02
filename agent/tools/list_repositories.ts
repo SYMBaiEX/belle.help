@@ -1,13 +1,16 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { db } from "../lib/convex";
-import { requireTenantCaller } from "../lib/tenant";
+import { tenantCallerOrError } from "../lib/tenant";
 
 export default defineTool({
-  description: "List every repository configured for this Belle user, with autonomy level and watch status.",
+  description:
+    "List every repository configured for this Belle user, with autonomy level and watch status. Returns { ok: false, message } when the request cannot be satisfied — relay the message rather than retrying blindly.",
   inputSchema: z.object({}),
   async execute(_input, ctx) {
-    const caller = requireTenantCaller(ctx);
+    const tenant = tenantCallerOrError(ctx);
+    if (!tenant.ok) return tenant;
+    const { caller } = tenant;
 
     const repos = (await db.query("repositories:listByUser", {
       userId: caller.userId,
@@ -23,6 +26,7 @@ export default defineTool({
     }>;
 
     return {
+      ok: true as const,
       repositories: repos.map((r) => ({
         fullName: r.fullName,
         owner: r.owner,

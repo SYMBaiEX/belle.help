@@ -4,13 +4,15 @@ import { octokitForTenant } from "../lib/github";
 
 export default defineTool({
   description:
-    "Inspect CI status for a commit: compact list of check runs and combined commit status, plus the overall combined state.",
+    "Inspect CI status for a commit: compact list of check runs and combined commit status, plus the overall combined state. Returns { ok: false, message } when the request cannot be satisfied — relay the message rather than retrying blindly.",
   inputSchema: z.object({
     repositoryFullName: z.string().min(1).describe("owner/repo"),
     ref: z.string().min(1).describe("Commit SHA or branch name"),
   }),
   async execute({ repositoryFullName, ref }, ctx) {
-    const { octokit, repo } = await octokitForTenant(ctx, repositoryFullName);
+    const github = await octokitForTenant(ctx, repositoryFullName);
+    if (!github.ok) return github;
+    const { octokit, repo } = github;
 
     const [checkRuns, combinedStatus] = await Promise.all([
       octokit.rest.checks.listForRef({ owner: repo.owner, repo: repo.name, ref, per_page: 50 }),
@@ -18,6 +20,7 @@ export default defineTool({
     ]);
 
     return {
+      ok: true as const,
       repositoryFullName,
       ref,
       combinedState: combinedStatus.data.state,

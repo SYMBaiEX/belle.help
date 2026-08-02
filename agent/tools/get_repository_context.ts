@@ -1,16 +1,18 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { db } from "../lib/convex";
-import { requireTenantCaller } from "../lib/tenant";
+import { tenantCallerOrError } from "../lib/tenant";
 
 export default defineTool({
   description:
-    "Get a repository's Belle configuration (autonomy level, review policy, notification/watch filters) plus any repository-scoped memories Belle has recorded about it.",
+    "Get a repository's Belle configuration (autonomy level, review policy, notification/watch filters) plus any repository-scoped memories Belle has recorded about it. Returns { ok: false, message } when the request cannot be satisfied — relay the message rather than retrying blindly.",
   inputSchema: z.object({
     repositoryFullName: z.string().min(1).describe("owner/repo"),
   }),
   async execute({ repositoryFullName }, ctx) {
-    const caller = requireTenantCaller(ctx);
+    const tenant = tenantCallerOrError(ctx);
+    if (!tenant.ok) return tenant;
+    const { caller } = tenant;
 
     const repo = (await db.query("repositories:getByUserAndFullName", {
       userId: caller.userId,
@@ -36,7 +38,11 @@ export default defineTool({
     } | null;
 
     if (!repo) {
-      throw new Error(`Repository ${repositoryFullName} is not configured for this user.`);
+      return {
+        ok: false as const,
+        reason: "repository_not_configured",
+        message: `Repository ${repositoryFullName} is not configured for this user.`,
+      };
     }
 
     const memories = (await db.query("memories:listByUserAndScope", {
@@ -45,6 +51,7 @@ export default defineTool({
     })) as Array<{ repositoryFullName?: string; key: string; value: string; updatedAt: number }>;
 
     return {
+      ok: true as const,
       repository: {
         fullName: repo.fullName,
         owner: repo.owner,
