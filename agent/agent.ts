@@ -1,12 +1,14 @@
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "anthropic/claude-sonnet-5",
-  // Belle's root session is conversational: resolve context, pick a tool,
-  // reply in a couple of sentences. Measured turns were 9-15s, and heavy
-  // deliberation on a texting surface costs latency without improving
-  // answers. Deep analysis happens in the reviewer/fixer subagents, which
-  // keep the provider default. Providers that don't honor a level ignore it.
+  // Root session: routing a text, resolving context, and replying in a couple
+  // of sentences. Fast and cheap matters more here than deep reasoning, and
+  // this is the model the owner selected.
+  model: "deepseek/deepseek-v4-flash",
+  // Measured turns were 9-15s; heavy deliberation on a texting surface costs
+  // latency without improving answers. Deep analysis happens in the reviewer /
+  // security / fixer subagents, which keep a stronger model. Providers that do
+  // not honor a level ignore it.
   reasoning: "low",
   limits: {
     maxInputTokensPerSession: 2_000_000,

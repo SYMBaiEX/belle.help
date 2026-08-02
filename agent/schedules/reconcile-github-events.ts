@@ -2,6 +2,7 @@ import { defineSchedule } from "eve/schedules";
 
 import linq from "../channels/linq";
 import { db } from "../lib/convex";
+import { scheduledUserAuth } from "../lib/schedule-auth";
 
 /**
  * Safety-net sweep for `scheduledActions`.
@@ -64,7 +65,7 @@ function messageFor(action: ScheduledAction): string | null {
 
 export default defineSchedule({
   cron: "*/5 * * * *",
-  async run({ receive, waitUntil, appAuth }) {
+  async run({ receive, waitUntil }) {
     const due = (await db.query("scheduledActions:listDue", {
       now: Date.now(),
     })) as ScheduledAction[];
@@ -87,7 +88,7 @@ export default defineSchedule({
         receive(linq, {
           message,
           target: { adapterName: "linq", threadId: context.linqChatId },
-          auth: appAuth,
+          auth: scheduledUserAuth(action.userId, context.linqChatId),
         }),
       );
     }

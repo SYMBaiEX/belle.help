@@ -2,6 +2,7 @@ import { defineSchedule } from "eve/schedules";
 
 import linq from "../channels/linq";
 import { db } from "../lib/convex";
+import { scheduledUserAuth } from "../lib/schedule-auth";
 
 interface DigestTarget {
   userId: string;
@@ -16,7 +17,7 @@ interface DigestTarget {
  */
 export default defineSchedule({
   cron: "0 * * * *",
-  async run({ receive, waitUntil, appAuth }) {
+  async run({ receive, waitUntil }) {
     const hourUtc = new Date().getUTCHours();
     const targets = (await db.query("digests:listDigestTargets", {
       hourUtc,
@@ -31,7 +32,7 @@ export default defineSchedule({
             "pending approvals, and Belle activity in the last 24 hours, bundled into one " +
             "short text. If nothing notable happened, finish without sending anything.",
           target: { adapterName: "linq", threadId: target.linqChatId },
-          auth: appAuth,
+          auth: scheduledUserAuth(target.userId, target.linqChatId),
         }),
       );
     }
