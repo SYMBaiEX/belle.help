@@ -106,6 +106,46 @@ The watchdog escalates to it automatically when it has to recover the same
 conversation twice within 24 hours: a second stall means the turn was never the
 problem.
 
+### 5. Tool output is bounded per result, not per item
+
+Uncapping the budget removes the interruption but not the underlying waste.
+Measured on the real session: 2,010,898 input tokens over 13 turns — roughly
+155,000 per turn.
+
+The static prompt was never the cause. Measured: instructions ~1.7k tokens,
+all 27 authored tool descriptions ~2.2k, skill bodies loaded on demand via
+`load_skill` rather than inlined, and the sandbox built-ins (`bash`,
+`read_file`, `write_file`, `glob`, `grep`, `web_fetch`, `web_search`, `agent`)
+already disabled at the root. Production `/eve/v1/info` confirms 29 advertised
+tools. Total static overhead is ~6k tokens.
+
+The cause was **per-item truncation limits multiplying**:
+
+| Tool | Per item | Items | Per call |
+|---|---|---|---|
+| `list_pull_request_files` | 4,000 chars | 30 | ~30k tokens |
+| `get_check_logs` | 1,000 chars | 50 | ~12k tokens |
+| `list_repositories` | — | 127 | ~5k tokens |
+
+Each limit is defensible alone. Together they authorize a single turn to pull
+60–80k tokens, and because a tool result is appended to the transcript and
+re-sent on every later turn, that cost recurs for the rest of the conversation.
+
+`agent/lib/budget.ts` enforces a budget across the whole result. It keeps whole
+items rather than shrinking all of them: a few complete diffs are more useful
+than thirty fragments, and a fragment of a patch can actively mislead about
+what a change does. Results report what was dropped so the model can ask rather
+than guess.
+
+`list_repositories` gained `search` / `watchedOnly` and returns counts, so
+"am I watching doolittle?" no longer materializes 127 repositories.
+
+Instructions gained a "Pulling only what you need" section, because bounding
+tool output only limits the damage — the durable fix is an agent that asks
+narrowly, reads summaries before details, does not re-fetch what is already in
+the conversation, and delegates deep reading to subagents whose separate
+context is the entire reason they exist.
+
 ## Consequences
 
 - A single conversation has no framework-level spend ceiling. Per-user quotas
