@@ -47,6 +47,13 @@ jobs:
     needs: verify
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    # Job-level env, deliberately. The `secrets` context is NOT allowed in a
+    # step-level `if:`, and a step's own `env:` does not exist yet when its
+    # `if:` is evaluated — so the key has to be lifted here for the gate to see
+    # it. Getting this wrong fails the workflow at parse time (no logs) or
+    # silently skips the deploy forever.
+    env:
+      CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
     steps:
       - uses: actions/checkout@v5
 
@@ -57,16 +64,11 @@ jobs:
 
       - run: npm ci
 
-      # The key is created with: bunx convex deployment token create --prod <name>
-      # Gate on `secrets` directly: a step's `if:` is evaluated BEFORE that same
-      # step's `env:` block exists, so the previous `env.CONVEX_DEPLOY_KEY != ''`
-      # condition was always false and this deploy silently never ran.
+      # Key created with: bunx convex deployment token create --prod <name>
       - name: Deploy to Convex production
-        if: ${{ secrets.CONVEX_DEPLOY_KEY != '' }}
+        if: ${{ env.CONVEX_DEPLOY_KEY != '' }}
         run: npx convex deploy -y
-        env:
-          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
 
       - name: Note when Convex deploy is skipped
-        if: ${{ secrets.CONVEX_DEPLOY_KEY == '' }}
+        if: ${{ env.CONVEX_DEPLOY_KEY == '' }}
         run: echo "CONVEX_DEPLOY_KEY not set — skipping Convex deploy. Add it in repo secrets to enable."
