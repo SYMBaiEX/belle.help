@@ -56,6 +56,59 @@ export const listWatchable = query({
   },
 });
 
+/**
+ * Ask for the durable session behind a chat to be retired at the next safe
+ * boundary. Addressed by chat id so an operator can call it without knowing
+ * anything about eve session ids.
+ */
+export const requestRetire = mutation({
+  args: { linqChatId: v.string() },
+  handler: async (ctx, args) => {
+    const context = await ctx.db
+      .query("conversationContexts")
+      .withIndex("by_linqChatId", (q) => q.eq("linqChatId", args.linqChatId))
+      .unique();
+    if (!context) return { ok: false as const, reason: "unknown_chat" };
+
+    await ctx.db.patch(context._id, { retireRequested: true, updatedAt: Date.now() });
+    return { ok: true as const, eveSessionId: context.eveSessionId ?? null };
+  },
+});
+
+/** Whether this chat's session should be retired now. */
+export const retireState = query({
+  args: { linqChatId: v.string() },
+  handler: async (ctx, args) => {
+    const context = await ctx.db
+      .query("conversationContexts")
+      .withIndex("by_linqChatId", (q) => q.eq("linqChatId", args.linqChatId))
+      .unique();
+    return { retireRequested: context?.retireRequested === true };
+  },
+});
+
+/** Clear the retire flag once the continuation token has been released. */
+export const markRetired = mutation({
+  args: { linqChatId: v.string() },
+  handler: async (ctx, args) => {
+    const context = await ctx.db
+      .query("conversationContexts")
+      .withIndex("by_linqChatId", (q) => q.eq("linqChatId", args.linqChatId))
+      .unique();
+    if (!context) return;
+
+    // Drop the stale session pointer with the flag: it names a session that no
+    // longer owns this conversation, and leaving it would let the watchdog
+    // cancel turns on an abandoned session.
+    await ctx.db.patch(context._id, {
+      retireRequested: false,
+      retiredAt: Date.now(),
+      eveSessionId: undefined,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
 /** Record that a wedged session was cancelled for this inbound message. */
 export const markRecovered = mutation({
   args: { id: v.id("conversationContexts"), messageId: v.string() },

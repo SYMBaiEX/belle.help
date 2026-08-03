@@ -43,12 +43,19 @@ const STUCK_AFTER_MS = 10 * 60 * 1000;
 /** Only inspect conversations that saw activity recently. */
 const ACTIVE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
+/**
+ * A second stall within this window means cancelling did not hold, so the
+ * session itself is the problem and gets retired rather than nudged again.
+ */
+const REPEAT_OFFENDER_MS = 24 * 60 * 60 * 1000;
+
 interface WatchableContext {
   _id: string;
   userId: string;
   linqChatId: string;
   eveSessionId: string;
   lastRecoveredMessageId?: string;
+  lastRecoveredAt?: number;
 }
 
 /** Base URL of this deployment, for calling our own eve routes. */
@@ -133,11 +140,29 @@ export default defineSchedule({
           messageId: latest.id,
         });
 
+        // Cancelling twice in a day means the turn is not the problem — the
+        // session is. Some faults survive every cancel because eve pins them at
+        // session creation and never refreshes them (token limits, most
+        // notably), so the only real fix is a replacement session. Retiring
+        // frees this chat's continuation token at the next settled turn.
+        const repeatOffender =
+          context.lastRecoveredAt !== undefined &&
+          now - context.lastRecoveredAt < REPEAT_OFFENDER_MS;
+
+        if (repeatOffender) {
+          await db.mutation("conversationContexts:requestRetire", {
+            linqChatId: context.linqChatId,
+          });
+          console.warn(`[unstick] ${context.linqChatId} stalled again — retiring its session`);
+        }
+
         await recordAudit({
           userId: context.userId,
           actor: "system",
           action: "conversation.unstuck",
-          detail: `Cancelled wedged session ${context.eveSessionId}`,
+          detail: repeatOffender
+            ? `Cancelled and retired repeatedly wedged session ${context.eveSessionId}`
+            : `Cancelled wedged session ${context.eveSessionId}`,
         });
 
         // The cancelled turn produced nothing the user ever saw, and eve keeps

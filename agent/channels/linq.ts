@@ -65,6 +65,42 @@ export const { bot, channel, send } = chatSdkChannel({
   // Texting surfaces deliver one message per turn; no post-then-edit streaming.
   streaming: false,
   events: {
+    /**
+     * Retire a session that can only be fixed by replacing it.
+     *
+     * eve pins a session's `limits` at creation and never refreshes them from
+     * config on later turns (only the model, tools, and compaction settings
+     * refresh). So a session created under a bad token budget keeps that budget
+     * for its entire life — it will re-raise its continuation prompt after
+     * every cancel, forever. No amount of redeploying fixes it.
+     *
+     * Re-keying the session's continuation token frees this chat's address
+     * without deleting anything: the old session keeps its history under a
+     * dead token, and the next inbound message mints a fresh session on the
+     * current configuration.
+     *
+     * `session.waiting` is the right boundary — it fires once a turn has fully
+     * settled, so this never races in-flight work, and unlike `message.completed`
+     * it has no built-in handler to displace.
+     */
+    async "session.waiting"(_eventData, eventChannel) {
+      const linqChatId = eventChannel.thread?.id;
+      if (!linqChatId) return;
+
+      try {
+        const state = (await db.query("conversationContexts:retireState", {
+          linqChatId,
+        })) as { retireRequested: boolean };
+        if (!state.retireRequested) return;
+
+        eventChannel.setContinuationToken(`retired:${linqChatId}:${Date.now()}`);
+        await db.mutation("conversationContexts:markRetired", { linqChatId });
+        console.info(`[linq-channel] retired session for ${linqChatId}; next message starts fresh`);
+      } catch (error) {
+        // Never let bookkeeping break a settled turn.
+        console.error("[linq-channel] retire check failed", error);
+      }
+    },
     "session.failed"(_eventData, eventChannel) {
       if (!eventChannel.thread) return;
       return eventChannel.thread.post(

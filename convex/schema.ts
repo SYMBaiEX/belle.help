@@ -342,6 +342,13 @@ export default defineSchema({
     // after a recovery is never cancelled again for the same stall.
     lastRecoveredMessageId: v.optional(v.string()),
     lastRecoveredAt: v.optional(v.number()),
+    // Retire the durable session behind this chat at the next safe boundary.
+    // Cancelling a turn cannot fix a session whose *limits* are wrong: eve
+    // pins limits at session creation and never refreshes them from config,
+    // so a session created under a bad budget re-raises its continuation
+    // prompt forever. Only a new session picks up the current configuration.
+    retireRequested: v.optional(v.boolean()),
+    retiredAt: v.optional(v.number()),
     updatedAt: v.number(),
   })
     .index("by_userId", ["userId"])
