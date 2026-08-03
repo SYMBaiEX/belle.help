@@ -10,19 +10,35 @@ export default defineAgent({
   // security / fixer subagents, which keep a stronger model. Providers that do
   // not honor a level ignore it.
   reasoning: "low",
+  // Compact sooner than the 0.9 default. Belle's turns are short texts against
+  // a long relationship, so riding at 90% of the window means paying to resend
+  // a huge prompt for every "yeah do it" — slower and more expensive for no
+  // added understanding. Compaction is automatic and always has been; it never
+  // asks the user for anything.
+  compaction: {
+    thresholdPercent: 0.7,
+  },
   limits: {
-    // eve's default is 40M input tokens per session. The previous 2M was 20x
-    // lower and wrong for this product: a Belle conversation is a texting
-    // relationship that runs for weeks, so the budget guardrail fired, parked
-    // the session on a continuation prompt, and — because eve holds
-    // non-matching text until a pending input request is answered — silently
-    // swallowed every message after it. The user saw an agent that had simply
-    // stopped replying.
+    // Uncapped deliberately.
     //
-    // Cost is controlled per user through usageEvents and quotas, not by
-    // strangling the conversation. Compaction (default 0.9) keeps context in
-    // range long before this ceiling matters.
-    maxInputTokensPerSession: 40_000_000,
+    // This is a budget guardrail, NOT compaction, and the distinction is the
+    // whole reason Belle went silent. On reaching the cap eve parks the session
+    // and texts the user a continuation prompt ("just approve to keep going"),
+    // then holds every non-matching message until it is answered. That is a
+    // machine interrupting a conversation to discuss its own accounting — the
+    // opposite of texting a person.
+    //
+    // It was also load-bearing for the two-day outage: subagents inherit a
+    // share of the parent's *remaining* budget, so an exhausted parent
+    // dispatched a code-fixer with effectively no quota, which parked on a
+    // continuation prompt no one could answer and wedged the parent turn
+    // behind it. An uncapped parent delegates uncapped children, so that
+    // failure mode cannot recur.
+    //
+    // Spend is still bounded — per-user quotas in `usageEvents` are the right
+    // place for it, because they can refuse work before it starts instead of
+    // stranding a half-finished conversation.
+    maxInputTokensPerSession: false,
     sessionTimeoutMs: 30 * 24 * 60 * 60 * 1000,
   },
   build: {
