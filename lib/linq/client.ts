@@ -128,6 +128,59 @@ export async function chatHealth(linqChatId: string): Promise<string | null> {
   }
 }
 
+export interface ChatMessageSummary {
+  id: string;
+  createdAt: number;
+  fromMe: boolean;
+  text: string;
+}
+
+/**
+ * Newest-first messages in a chat.
+ *
+ * This is the only view of a conversation that reflects what the user actually
+ * sees. The watchdog schedule uses it to detect the one failure the agent
+ * cannot report about itself: an inbound message that never got an answer
+ * because the durable session is wedged on an in-flight turn.
+ */
+export async function recentMessages(
+  linqChatId: string,
+  limit = 5,
+): Promise<ChatMessageSummary[]> {
+  const body = await linqFetch(
+    `/chats/${encodeURIComponent(rawChatId(linqChatId))}/messages?limit=${limit}`,
+    { method: "GET" },
+  );
+
+  const raw = (body as { messages?: unknown; data?: unknown }).messages ?? body.data;
+  if (!Array.isArray(raw)) return [];
+
+  const parsed = raw.flatMap((entry): ChatMessageSummary[] => {
+    const m = entry as {
+      id?: unknown;
+      created_at?: unknown;
+      is_from_me?: unknown;
+      parts?: unknown;
+    };
+    if (typeof m.id !== "string" || typeof m.created_at !== "string") return [];
+    const createdAt = Date.parse(m.created_at);
+    if (Number.isNaN(createdAt)) return [];
+
+    const text = Array.isArray(m.parts)
+      ? m.parts
+          .map((p) => (p as { value?: unknown }).value)
+          .filter((v): v is string => typeof v === "string")
+          .join(" ")
+      : "";
+
+    return [{ id: m.id, createdAt, fromMe: m.is_from_me === true, text }];
+  });
+
+  // Do not trust the API's ordering — sort explicitly so "the latest message"
+  // means the same thing regardless of how the page came back.
+  return parsed.sort((a, b) => b.createdAt - a.createdAt);
+}
+
 export function isLinqConfigured(): boolean {
   return Boolean(process.env.LINQ_API_KEY);
 }

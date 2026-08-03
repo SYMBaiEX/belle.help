@@ -31,6 +31,43 @@ export const getByUserId = query({
   },
 });
 
+/**
+ * Conversations the watchdog should inspect: every context that has a durable
+ * eve session and has seen activity recently. A chat with no session id was
+ * never dispatched to the model, so it cannot be wedged.
+ */
+export const listWatchable = query({
+  args: { activeSinceMs: v.number(), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const cutoff = Date.now() - args.activeSinceMs;
+    const contexts = await ctx.db.query("conversationContexts").collect();
+
+    return contexts
+      .filter((c) => c.eveSessionId !== undefined && c.updatedAt >= cutoff)
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, args.limit ?? 50)
+      .map((c) => ({
+        _id: c._id,
+        userId: c.userId,
+        linqChatId: c.linqChatId,
+        eveSessionId: c.eveSessionId,
+        lastRecoveredMessageId: c.lastRecoveredMessageId,
+      }));
+  },
+});
+
+/** Record that a wedged session was cancelled for this inbound message. */
+export const markRecovered = mutation({
+  args: { id: v.id("conversationContexts"), messageId: v.string() },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, {
+      lastRecoveredMessageId: args.messageId,
+      lastRecoveredAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+  },
+});
+
 export const upsert = mutation({
   args: {
     userId: v.id("users"),

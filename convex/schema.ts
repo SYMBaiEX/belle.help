@@ -336,6 +336,12 @@ export default defineSchema({
     activePrNumber: v.optional(v.number()),
     activeHeadSha: v.optional(v.string()),
     pendingApprovalId: v.optional(v.id("approvalRequests")),
+    // Set by the unstick-conversations watchdog: the Linq message id of the
+    // last inbound that it had to recover a wedged session for. Recovery is
+    // keyed on the message rather than on time so a chat that stays quiet
+    // after a recovery is never cancelled again for the same stall.
+    lastRecoveredMessageId: v.optional(v.string()),
+    lastRecoveredAt: v.optional(v.number()),
     updatedAt: v.number(),
   })
     .index("by_userId", ["userId"])

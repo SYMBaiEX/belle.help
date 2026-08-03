@@ -4,6 +4,7 @@ import { localDev, vercelOidc, type AuthFn } from "eve/channels/auth";
 // Import the pure-crypto module, not ../../lib/auth/session — the latter
 // pulls in `next/headers`, which the Eve agent bundle cannot resolve.
 import { verifySessionCookie } from "../../lib/auth/session-token";
+import { bearerToken, verifyInternalToken } from "../../lib/security/internal-token";
 
 /**
  * Web/API channel auth for the embedded Eve routes (dashboard chat, session
@@ -32,6 +33,24 @@ function belleSessionAuth(): AuthFn<Request> {
   };
 }
 
+/**
+ * Deployment-internal caller (the unstick-conversations watchdog), which needs
+ * to POST a session cancel. Not a user principal: it acts on the app's behalf
+ * and carries no tenant, so it can never reach tenant-scoped tools — the tool
+ * layer fails closed without a `tenantId`.
+ */
+function internalServiceAuth(): AuthFn<Request> {
+  return async (request) => {
+    if (!verifyInternalToken(bearerToken(request.headers.get("authorization")))) return null;
+    return {
+      authenticator: "belle-internal",
+      principalType: "runtime",
+      principalId: "belle:watchdog",
+      attributes: { surface: "internal" },
+    };
+  };
+}
+
 export default eveChannel({
-  auth: [vercelOidc(), belleSessionAuth(), localDev()],
+  auth: [vercelOidc(), belleSessionAuth(), internalServiceAuth(), localDev()],
 });
