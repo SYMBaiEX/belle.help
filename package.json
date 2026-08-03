@@ -14,7 +14,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "seed:admin": "node scripts/seed-admin.mjs"
+    "seed:admin": "node scripts/seed-admin.mjs",
+    "evals": "eve eval --url ${BELLE_EVAL_URL:-https://belle.help}",
+    "evals:gates": "eve eval --tag gate --strict --url ${BELLE_EVAL_URL:-https://belle.help}"
   },
   "dependencies": {
     "@chat-adapter/state-memory": "^4.36.0",

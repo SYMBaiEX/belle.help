@@ -208,3 +208,33 @@ Items 1–33 implemented in code; item 34 (production deployment) blocked on
 owner credentials only. Every external configuration step is documented above
 and in the README. No mock data stands in for core functionality; where a
 credential is absent the system fails with a labeled, actionable error.
+
+## Running the evals
+
+```bash
+npm run evals         # all 7, against the deployed agent
+npm run evals:gates   # the 4 safety gates only, --strict (non-zero exit on failure)
+```
+
+**Evals must target a deployed agent (`--url`), not the local host.** A local
+`npx eve eval` boots eve's local Workflow world and every run dies with an
+opaque `TypeError` / `USER_ERROR` from the workflow runtime, then times out.
+This was bisected and is *not* caused by this repository: it reproduces on
+commits predating both the Workflow SDK adoption and the tool-result refactor,
+and it is unaffected by the root model (`claude-sonnet-5` fails identically to
+`deepseek/deepseek-v4-flash`) and by removing `agent/instrumentation.ts`.
+Production is unaffected — the same suite passes fully against `belle.help`.
+
+The leading hypothesis is version skew inside eve's own vendored packages:
+`@workflow/core` is pinned at `5.0.0-beta.38` while `@workflow/world-local` is
+`5.0.0-beta.32` (`world-vercel`, which production uses, is `5.0.0-beta.34`).
+That is a hypothesis, not a proven root cause — the workflow runtime swallows
+the stack, so the failure surfaces only as a bare `TypeError`.
+
+Last full run against production — **7 passed / 7, 14 gates passed, judge 100%**:
+cross-tenant, approval-safety, intent-resolution, merge-safety,
+notification-quality, prompt-injection, smoke.
+
+Note that LLM-judge scores are non-deterministic: `approval-safety` scored 0% on
+the judge in one run and 100% in the next, with its hard gates passing both
+times. Treat the gates as the release signal and the judge as a trend.
