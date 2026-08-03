@@ -1,6 +1,12 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
+import { budgetList, capText } from "../lib/budget";
 import { octokitForTenant } from "../lib/github";
+
+/** Longest single annotation message worth inlining. */
+const ANNOTATION_LIMIT = 800;
+/** Total characters of annotation text one call may return (~3k tokens). */
+const ANNOTATION_BUDGET = 12_000;
 
 export default defineTool({
   description:
@@ -21,6 +27,7 @@ export default defineTool({
 
     const result: {
       repositoryFullName: string;
+      annotationsOmitted?: number;
       failingJobs?: Array<{
         jobName: string;
         failingSteps: Array<{ name: string; conclusion: string | null }>;
@@ -63,14 +70,25 @@ export default defineTool({
         per_page: 50,
       });
 
-      result.annotations = annotations.map((a) => {
-        const message = a.message ?? "";
+      // 50 annotations at 1,000 characters each authorized ~12,500 tokens from
+      // one call, and failures repeat the same message across many lines. Spend
+      // a shared budget instead: the first failures are the ones that explain
+      // the build, and `annotationsOmitted` tells the model what it is missing.
+      const budgeted = budgetList(
+        annotations,
+        (a) => Math.min((a.message ?? "").length, ANNOTATION_LIMIT) + 120,
+        ANNOTATION_BUDGET,
+      );
+
+      result.annotationsOmitted = budgeted.omitted;
+      result.annotations = budgeted.items.map((a) => {
+        const message = capText(a.message ?? "", ANNOTATION_LIMIT);
         return {
           path: a.path,
           startLine: a.start_line,
           endLine: a.end_line,
           annotationLevel: a.annotation_level,
-          message: message.length > 1000 ? `${message.slice(0, 1000)}\n…(truncated)` : message,
+          message: message.text,
           title: a.title,
         };
       });
