@@ -191,6 +191,43 @@ npx eve eval        # agent evals; merge-safety / approval-safety /
                     # prompt-injection / cross-tenant are release gates
 ```
 
+## Pausing and resuming Belle
+
+Belle is currently **paused** (2026-08-04) so another agent can use the Linq
+line. Nothing was deleted; the deployment and website stay up.
+
+What pausing does — three independent locks, in order of bluntness:
+
+1. **Linq webhook subscription deactivated** (`is_active: false`). Stops
+   delivery at the source. Deactivated rather than deleted on purpose: Linq
+   only returns a subscription's signing secret at creation, so deleting it
+   would permanently destroy the secret in `LINQ_WEBHOOK_SECRET`.
+2. **`BELLE_PAUSED=1`** short-circuits every schedule, both inbound channels,
+   and the eve session routes (which back the dashboard chat — a live
+   inference path no channel guard covers). This is the lock that stops
+   inference: a cron fires whether or not credentials exist.
+3. **`LINQ_API_KEY` removed** from Vercel. Recoverable from
+   `~/.linq/config.json` or the Linq dashboard.
+
+To resume:
+
+```bash
+vercel env rm BELLE_PAUSED production -y
+# restore the Linq key (value from ~/.linq/config.json or the Linq dashboard)
+vercel env add LINQ_API_KEY production
+vercel deploy --prod
+```
+
+Then re-activate the webhook subscription (`is_active: true`) via the Linq API
+— reusing the existing subscription keeps `LINQ_WEBHOOK_SECRET` valid. Creating
+a new subscription instead mints a new secret, which must be written back to
+Vercel or every inbound webhook will fail signature verification.
+
+`tests/unit/paused.test.ts` asserts the pause has no gaps: every schedule
+checks `isPaused`, no markdown schedules exist (task mode cannot be paused),
+and both channels check. A pause with a gap reads as "off" while something
+keeps spending.
+
 ## Troubleshooting
 
 - **`NEXT_PUBLIC_CONVEX_URL is not set`** — run `npx convex dev` (writes
