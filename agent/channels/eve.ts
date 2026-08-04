@@ -5,6 +5,7 @@ import { localDev, vercelOidc, type AuthFn } from "eve/channels/auth";
 // pulls in `next/headers`, which the Eve agent bundle cannot resolve.
 import { verifySessionCookie } from "../../lib/auth/session-token";
 import { bearerToken, verifyInternalToken } from "../../lib/security/internal-token";
+import { isPaused, logPaused } from "../lib/paused";
 
 /**
  * Web/API channel auth for the embedded Eve routes (dashboard chat, session
@@ -51,6 +52,34 @@ function internalServiceAuth(): AuthFn<Request> {
   };
 }
 
+/**
+ * Wrap an authenticator so it denies while Belle is paused.
+ *
+ * These routes create and resume sessions, so the dashboard chat is a live
+ * inference path that the Linq and GitHub channel guards do not cover. The auth
+ * layer is the narrowest place to close it — no per-route knowledge needed.
+ *
+ * The check is inside the returned function, not around the array: eve
+ * evaluates channel modules at BUILD time, so a module-scope `isPaused()` would
+ * bake the build machine's environment into the deployment. Reading it per
+ * request means flipping `BELLE_PAUSED` takes effect on redeploy of config
+ * alone, and reads the runtime value.
+ */
+function whenRunning(inner: AuthFn<Request>): AuthFn<Request> {
+  return async (request) => {
+    if (isPaused()) {
+      logPaused("eve session route");
+      return null;
+    }
+    return inner(request);
+  };
+}
+
 export default eveChannel({
-  auth: [vercelOidc(), belleSessionAuth(), internalServiceAuth(), localDev()],
+  auth: [
+    whenRunning(vercelOidc()),
+    whenRunning(belleSessionAuth()),
+    whenRunning(internalServiceAuth()),
+    whenRunning(localDev()),
+  ],
 });

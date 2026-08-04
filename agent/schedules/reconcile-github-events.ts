@@ -1,5 +1,7 @@
 import { defineSchedule } from "eve/schedules";
 
+import { isPaused, logPaused } from "../lib/paused";
+
 import linq from "../channels/linq";
 import { db } from "../lib/convex";
 import { scheduledUserAuth } from "../lib/schedule-auth";
@@ -66,6 +68,8 @@ function messageFor(action: ScheduledAction): string | null {
 export default defineSchedule({
   cron: "*/5 * * * *",
   async run({ receive, waitUntil }) {
+    if (isPaused()) return logPaused("reconcile-github-events");
+
     const due = (await db.query("scheduledActions:listDue", {
       now: Date.now(),
     })) as ScheduledAction[];

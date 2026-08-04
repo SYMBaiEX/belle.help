@@ -114,6 +114,43 @@ export const listWatchersByFullName = query({
   },
 });
 
+/**
+ * Turn off watch rules whose temporary window has elapsed.
+ *
+ * Deterministic on purpose. This ran as a markdown schedule — a fire-and-forget
+ * model session every 30 minutes — which meant paying for inference around the
+ * clock to usually discover there was nothing to do, and gave the sweep no way
+ * to decline to run. Deciding whether `watchExpiresAt` is in the past needs a
+ * comparison, not a language model.
+ *
+ * Returns what it changed so the caller can write audit entries.
+ */
+export const expireWatchRules = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+    const repos = await ctx.db.query("repositories").collect();
+
+    const expired = repos.filter(
+      (repo) =>
+        repo.watchEnabled && repo.watchExpiresAt !== undefined && repo.watchExpiresAt <= now,
+    );
+
+    for (const repo of expired) {
+      // Clear the deadline alongside the flag: leaving a past timestamp on a
+      // disabled rule makes it look perpetually "just expired" to any later
+      // reader.
+      await ctx.db.patch(repo._id, { watchEnabled: false, watchExpiresAt: undefined });
+    }
+
+    return expired.map((repo) => ({
+      userId: repo.userId,
+      fullName: repo.fullName,
+      expiredAt: repo.watchExpiresAt!,
+    }));
+  },
+});
+
 /** Patch any subset of a repository's watch/policy configuration. */
 export const updateConfig = mutation({
   args: {

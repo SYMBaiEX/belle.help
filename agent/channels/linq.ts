@@ -8,6 +8,7 @@ import { hashPhone, last4 } from "../../lib/encryption";
 import { createOnboardingToken } from "../../lib/security/onboarding-links";
 import { createShortLink } from "../../lib/short-links";
 import { db, recordAudit } from "../lib/convex";
+import { isPaused, logPaused } from "../lib/paused";
 
 /**
  * Linq → Eve channel.
@@ -142,6 +143,14 @@ async function alreadyProcessed(messageId: string): Promise<boolean> {
 
 async function handleInbound(thread: Thread, message: Message): Promise<void> {
   const text = (message.text ?? "").trim();
+
+  // Paused: accept the delivery so Linq does not retry, and stop here. No
+  // Convex write, no model dispatch, no reply — the conversation resumes
+  // exactly where it left off when BELLE_PAUSED is cleared.
+  if (isPaused()) {
+    logPaused("inbound Linq message");
+    return;
+  }
 
   // Respect opt-outs entirely — no reply, no model dispatch.
   if (OPT_OUT.has(text)) return;

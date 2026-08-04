@@ -1,5 +1,7 @@
 import { defineSchedule } from "eve/schedules";
 
+import { isPaused, logPaused } from "../lib/paused";
+
 import { isLinqConfigured, recentMessages, sendText } from "../../lib/linq/client";
 import { internalToken } from "../../lib/security/internal-token";
 import { db, recordAudit } from "../lib/convex";
@@ -90,6 +92,8 @@ async function cancelTurn(baseUrl: string, token: string, sessionId: string): Pr
 export default defineSchedule({
   cron: "*/5 * * * *",
   async run() {
+    if (isPaused()) return logPaused("unstick-conversations");
+
     if (!isLinqConfigured()) return;
 
     const token = internalToken();

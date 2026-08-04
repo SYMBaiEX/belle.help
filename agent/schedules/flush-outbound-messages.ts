@@ -1,5 +1,7 @@
 import { defineSchedule } from "eve/schedules";
 
+import { isPaused, logPaused } from "../lib/paused";
+
 import { isLinqConfigured, sendText } from "../../lib/linq/client";
 import { db } from "../lib/convex";
 
@@ -33,6 +35,8 @@ interface UnsentMessage {
 export default defineSchedule({
   cron: "*/2 * * * *",
   async run() {
+    if (isPaused()) return logPaused("flush-outbound-messages");
+
     if (!isLinqConfigured()) return;
 
     const pending = (await db.query("outboundMessages:listUnsent", {

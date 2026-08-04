@@ -1,6 +1,8 @@
 import { connectGitHubCredentials } from "@vercel/connect/eve";
 import { defaultGitHubAuth, githubChannel } from "eve/channels/github";
 
+import { isPaused, logPaused } from "../lib/paused";
+
 import { isLinqConfigured, sendText } from "../../lib/linq/client";
 import { db, recordAudit } from "../lib/convex";
 
@@ -146,13 +148,25 @@ export default githubChannel({
   credentials: connectGitHubCredentials(CONNECTOR),
 
   // Default @mention dispatch on comments, with actor-derived auth.
-  onComment: (ctx) => ({ auth: defaultGitHubAuth(ctx) }),
+  onComment: (ctx) => {
+    // Paused: an @mention must not open a session. Returning null consumes the
+    // event without dispatching, so GitHub sees a normal 200 and does not retry.
+    if (isPaused()) {
+      logPaused("GitHub @mention");
+      return null;
+    }
+    return { auth: defaultGitHubAuth(ctx) };
+  },
 
   // These hooks are AWAITED by eve (GitHubInboundResultOrPromise). Do the
   // work inline and await it — a fire-and-forget promise here is killed when
   // the serverless invocation ends, which silently dropped a real PR
   // notification after the dedup row had already been written.
   onPullRequest: async (ctx, pr) => {
+    if (isPaused()) {
+      logPaused("GitHub pull_request event");
+      return null;
+    }
     const repoFullName = ctx.repository.fullName;
     // "reopened" counts: closing and reopening is the natural way to
     // re-trigger a notification, and a reopened PR is genuinely new work.
@@ -177,6 +191,10 @@ export default githubChannel({
   },
 
   onCheckSuite: async (ctx, suite) => {
+    if (isPaused()) {
+      logPaused("GitHub check_suite event");
+      return null;
+    }
     if (suite.action === "completed" && suite.pullRequests.length > 0) {
       try {
         await handleCheckSuite(
